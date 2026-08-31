@@ -507,6 +507,24 @@ els.modeBtn.onclick = async () => {
   else setMode('edit');
 };
 
+// Click into the rendered note to start editing it.
+els.preview.addEventListener('click', () => {
+  if(!cache[currentType].loaded) return; // e.g. "Create it" prompt, nothing to edit yet
+  if(state.mode === 'edit') return;
+  setMode('edit');
+});
+
+// Click anywhere outside the note area to drop back to preview (and save).
+document.addEventListener('click', (e) => {
+  if(state.mode !== 'edit') return;
+  if(els.editWrap.contains(e.target)) return;   // click was inside the note itself
+  if(e.target === els.modeBtn) return;           // that button already manages its own transition
+  cache[currentType].content = els.raw.value;
+  clearTimeout(autosaveTimer);
+  setMode('preview');
+  save();
+});
+
 async function save(type){
   type = type || currentType;
   const entry = cache[type];
