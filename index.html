@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NoteKeeper</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<meta name="theme-color" content="#7c5cff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#1e1e2e; --panel:#25253a; --text:#dcddde; --muted:#8a8aa3;
+    --accent:#7c5cff; --border:#33334a; --code-bg:#2b2b40; --danger:#e06c75;
+    --note-font:'Inconsolata',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --note-size:14px;
+  }
+  [data-theme="light"]{
+    --bg:#faf9f7; --panel:#ffffff; --text:#2e2e2e; --muted:#767676;
+    --accent:#6f4fe0; --border:#e3e1dd; --code-bg:#f1f0ec; --danger:#c4392b;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column;
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 16px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  header .title{display:flex; align-items:baseline; gap:10px;}
+  header h1{font-size:15px; font-weight:600; margin:0;}
+  header .date{font-size:12px; color:var(--muted);}
+  header .actions{display:flex; align-items:center; gap:8px;}
+  #tabBar{display:none; gap:4px; padding:8px 16px 0; flex-shrink:0;}
+  #tabBar.visible{display:flex;}
+  #tabBar button{
+    background:transparent; border:1px solid transparent; border-bottom:none;
+    border-radius:6px 6px 0 0; padding:6px 14px; font-size:13px; color:var(--muted);
+  }
+  #tabBar button.active{
+    background:var(--panel); color:var(--text); border-color:var(--border);
+    font-weight:600;
+  }
+  button{
+    background:var(--panel); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;
+  }
+  button:hover{border-color:var(--accent);}
+  button.primary{background:var(--accent); color:#fff; border-color:var(--accent);}
+  button.icon{padding:6px 8px;}
+  main{flex:1; overflow:hidden; display:flex; flex-direction:column;}
+  #status{font-size:12px; color:var(--muted); padding:2px 16px 8px;}
+  #status.saving{color:var(--accent);}
+  #status.error{color:var(--danger);}
+  #connectScreen{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; text-align:center; padding:24px;
+  }
+  #connectScreen p{color:var(--muted); font-size:13px; max-width:320px;}
+  #editWrap{flex:1; overflow:hidden; display:flex; flex-direction:column; padding:0 16px 16px;}
+  textarea#raw{
+    flex:1; width:100%; resize:none; background:var(--panel); color:var(--text);
+    border:1px solid var(--border); border-radius:8px; padding:14px;
+    font-family:var(--note-font);
+    font-size:var(--note-size); line-height:1.6; outline:none;
+    white-space:pre-wrap; overflow-wrap:break-word;
+  }
+  #preview{
+    flex:1; overflow-y:auto; background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; padding:20px 24px; line-height:1.65;
+    font-family:var(--note-font); font-size:var(--note-size);
+  }
+  #preview h1,#preview h2,#preview h3,#preview h4{margin:1.2em 0 0.4em; font-weight:600;}
+  #preview h1{font-size:1.6em; border-bottom:1px solid var(--border); padding-bottom:.2em;}
+  #preview h2{font-size:1.35em;}
+  #preview h3{font-size:1.15em;}
+  #preview p{margin:.6em 0;}
+  #preview ul,#preview ol{margin:.4em 0; padding-left:1.6em;}
+  #preview li{margin:.15em 0;}
+  #preview li.task{list-style:none; margin-left:-1.6em; display:flex; gap:.5em; align-items:flex-start;}
+  #preview li.task input{margin-top:.3em; cursor:pointer;}
+  #preview code{background:var(--code-bg); padding:.1em .35em; border-radius:4px; font-size:.9em; font-family:ui-monospace,Menlo,Consolas,monospace;}
+  #preview pre{background:var(--code-bg); padding:12px 14px; border-radius:8px; overflow-x:auto;}
+  #preview pre code{background:none; padding:0;}
+  #preview blockquote{border-left:3px solid var(--accent); margin:.6em 0; padding:.2em 1em; color:var(--muted);}
+  #preview .callout{border-left:3px solid var(--accent); background:var(--code-bg); border-radius:6px; padding:.6em 1em; margin:.6em 0;}
+  #preview .callout-title{font-weight:600; margin-bottom:.2em;}
+  #preview hr{border:none; border-top:1px solid var(--border); margin:1.4em 0;}
+  #preview .tag{background:var(--accent); color:#fff; border-radius:10px; padding:1px 8px; font-size:.82em; text-decoration:none;}
+  #preview .wikilink{color:var(--accent); border-bottom:1px dotted var(--accent);}
+  #preview .frontmatter{color:var(--muted); font-size:.85em; font-family:ui-monospace,Menlo,Consolas,monospace; background:var(--code-bg); border-radius:6px; padding:10px 14px; margin-bottom:1em; white-space:pre-wrap;}
+  #preview strong{font-weight:700;}
+  #preview em{font-style:italic;}
+  .hint{font-size:11px; color:var(--muted); padding:0 16px 10px;}
+</style>
+</head>
+<body data-theme="dark">
+
+<header>
+  <div class="title">
+    <h1 id="noteTitle">📓 NoteKeeper</h1>
+    <span class="date" id="dateLabel"></span>
+  </div>
+  <div class="actions">
+    <button class="icon" id="themeBtn" title="Toggle theme">🌓</button>
+    <button class="icon" id="fontDownBtn" title="Smaller font">−</button>
+    <button class="icon" id="fontUpBtn" title="Larger font">+</button>
+    <button id="modeBtn" title="Toggle edit/preview">Edit</button>
+    <button class="primary" id="saveBtn" title="Save (Ctrl+S)">Save</button>
+  </div>
+</header>
+
+<div id="tabBar">
+  <button class="tab" data-type="daily">Daily</button>
+  <button class="tab" data-type="weekly">Weekly</button>
+  <button class="tab" data-type="monthly">Monthly</button>
+</div>
+
+<div id="status"></div>
+
+<main>
+  <div id="connectScreen">
+    <div style="font-size:34px;">📓</div>
+    <p>This app opens and edits your current daily, weekly, and monthly notes directly in your Dropbox — nothing else in your vault is touched.</p>
+    <button class="primary" id="connectBtn">Connect Dropbox</button>
+  </div>
+
+  <div id="editWrap" style="display:none;">
+    <textarea id="raw" spellcheck="false" wrap="soft" style="display:none;"></textarea>
+    <div id="preview"></div>
+  </div>
+</main>
+<div class="hint">On Windows: click the install icon in the address bar (Edge/Chrome) to pin this as an app, or right-click the tab → Pin.</div>
+
+<script>
+/* ====== CONFIGURE THIS ====== */
+const APP_KEY = "YOUR_DROPBOX_APP_KEY";      // from dropbox.com/developers/apps
+
+// One entry per note type. Adjust the folder paths (leading+trailing slash)
+// and filename patterns if your vault's Periodic Notes setup differs.
+const NOTE_TYPES = {
+  daily:   { label: 'Daily',   icon: '📓', folder: '/Journal/Daily/',   pathFn: dailyPath },
+  weekly:  { label: 'Weekly',  icon: '🗓️', folder: '/Journal/Weekly/',  pathFn: weeklyPath },
+  monthly: { label: 'Monthly', icon: '📆', folder: '/Journal/Monthly/', pathFn: monthlyPath },
+};
+/* ============================= */
+
+const REDIRECT_URI = location.href.split('?')[0].split('#')[0];
+
+function pad(n){ return String(n).padStart(2,'0'); }
+
+function dailyPath(){
+  const d = new Date();
+  const y = d.getFullYear(), m = pad(d.getMonth()+1), day = pad(d.getDate());
+  return { path: `${NOTE_TYPES.daily.folder}${y}-${m}-${day}.md`, label: `${y}-${m}-${day}` };
+}
+
+function isoWeekInfo(d){
+  // Monday-start ISO week, matches moment's "gggg-[W]ww"
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+  return { isoYear: date.getUTCFullYear(), isoWeek: weekNo };
+}
+function weeklyPath(){
+  const { isoYear, isoWeek } = isoWeekInfo(new Date());
+  const label = `${isoYear}-W${pad(isoWeek)}`;
+  return { path: `${NOTE_TYPES.weekly.folder}${label}.md`, label };
+}
+
+function monthlyPath(){
+  const d = new Date();
+  const label = `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+  return { path: `${NOTE_TYPES.monthly.folder}${label}.md`, label };
+}
+
+const els = {
+  connectScreen: document.getElementById('connectScreen'),
+  connectBtn: document.getElementById('connectBtn'),
+  editWrap: document.getElementById('editWrap'),
+  raw: document.getElementById('raw'),
+  preview: document.getElementById('preview'),
+  status: document.getElementById('status'),
+  modeBtn: document.getElementById('modeBtn'),
+  saveBtn: document.getElementById('saveBtn'),
+  themeBtn: document.getElementById('themeBtn'),
+  dateLabel: document.getElementById('dateLabel'),
+  noteTitle: document.getElementById('noteTitle'),
+  tabBar: document.getElementById('tabBar'),
+};
+
+// One cache entry per note type so switching tabs never loses unsaved edits.
+const cache = {
+  daily:   { path:'', label:'', content:'', dirty:false, loaded:false },
+  weekly:  { path:'', label:'', content:'', dirty:false, loaded:false },
+  monthly: { path:'', label:'', content:'', dirty:false, loaded:false },
+};
+let currentType = 'daily';
+let state = { mode:'preview' }; // mode is shared UI state, not per-type
+
+// ---------- theme ----------
+(function initTheme(){
+  const saved = localStorage.getItem('dn_theme') || 'dark';
+  document.body.dataset.theme = saved;
+})();
+els.themeBtn.onclick = () => {
+  const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.body.dataset.theme = next;
+  localStorage.setItem('dn_theme', next);
+};
+
+// ---------- font size ----------
+(function initFontSize(){
+  const saved = Number(localStorage.getItem('dn_font_size')) || 14;
+  document.documentElement.style.setProperty('--note-size', saved + 'px');
+})();
+function adjustFontSize(delta){
+  const current = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--note-size')) || 14;
+  const next = Math.min(24, Math.max(10, current + delta));
+  document.documentElement.style.setProperty('--note-size', next + 'px');
+  localStorage.setItem('dn_font_size', next);
+}
+document.getElementById('fontUpBtn').onclick = () => adjustFontSize(1);
+document.getElementById('fontDownBtn').onclick = () => adjustFontSize(-1);
+
+// ---------- PKCE helpers ----------
+function randomString(len){
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => ('0'+b.toString(16)).slice(-2)).join('').slice(0,len);
+}
+async function sha256Base64Url(str){
+  const enc = new TextEncoder().encode(str);
+  const digest = await crypto.subtle.digest('SHA-256', enc);
+  let b = String.fromCharCode(...new Uint8Array(digest));
+  return btoa(b).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+async function beginAuth(){
+  const verifier = randomString(64);
+  localStorage.setItem('dn_verifier', verifier);
+  const challenge = await sha256Base64Url(verifier);
+  const url = new URL('https://www.dropbox.com/oauth2/authorize');
+  url.searchParams.set('client_id', APP_KEY);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('code_challenge', challenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('redirect_uri', REDIRECT_URI);
+  url.searchParams.set('token_access_type', 'offline');
+  location.href = url.toString();
+}
+
+async function exchangeCode(code){
+  const verifier = localStorage.getItem('dn_verifier');
+  const body = new URLSearchParams({
+    code, grant_type:'authorization_code', client_id:APP_KEY,
+    code_verifier:verifier, redirect_uri:REDIRECT_URI
+  });
+  const res = await fetch('https://api.dropboxapi.com/oauth2/token', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body
+  });
+  if(!res.ok) throw new Error('Token exchange failed');
+  const data = await res.json();
+  storeTokens(data);
+  history.replaceState({}, '', REDIRECT_URI); // strip ?code= from URL
+}
+
+function storeTokens(data){
+  localStorage.setItem('dn_access_token', data.access_token);
+  localStorage.setItem('dn_token_expiry', Date.now() + (data.expires_in*1000) - 30000);
+  if(data.refresh_token) localStorage.setItem('dn_refresh_token', data.refresh_token);
+}
+
+async function refreshToken(){
+  const refresh_token = localStorage.getItem('dn_refresh_token');
+  if(!refresh_token) return false;
+  const body = new URLSearchParams({ grant_type:'refresh_token', refresh_token, client_id:APP_KEY });
+  const res = await fetch('https://api.dropboxapi.com/oauth2/token', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body
+  });
+  if(!res.ok) return false;
+  const data = await res.json();
+  storeTokens(data);
+  return true;
+}
+
+async function getAccessToken(){
+  const expiry = Number(localStorage.getItem('dn_token_expiry') || 0);
+  if(Date.now() > expiry){
+    const ok = await refreshToken();
+    if(!ok) return null;
+  }
+  return localStorage.getItem('dn_access_token');
+}
+
+function isConnected(){
+  return !!localStorage.getItem('dn_refresh_token');
+}
+
+// ---------- Dropbox file ops ----------
+async function downloadFile(path){
+  const token = await getAccessToken();
+  const res = await fetch('https://content.dropboxapi.com/2/files/download', {
+    method:'POST',
+    headers:{
+      'Authorization':'Bearer '+token,
+      'Dropbox-API-Arg': JSON.stringify({ path })
+    }
+  });
+  if(res.status === 409) return null; // not found
+  if(!res.ok) throw new Error('Download failed');
+  return await res.text();
+}
+
+async function uploadFile(path, content, mode){
+  const token = await getAccessToken();
+  const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
+    method:'POST',
+    headers:{
+      'Authorization':'Bearer '+token,
+      'Content-Type':'application/octet-stream',
+      'Dropbox-API-Arg': JSON.stringify({ path, mode: mode||'overwrite', mute:true })
+    },
+    body: content
+  });
+  if(!res.ok) throw new Error('Upload failed');
+  return await res.json();
+}
+
+// ---------- Obsidian-ish markdown render ----------
+function escapeHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function inline(md){
+  let s = escapeHtml(md);
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(?<!\*)\*(?!\*)([^*]+)\*(?!\*)/g, '<em>$1</em>');
+  s = s.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (m,name,_,alias)=>`<span class="wikilink">${alias||name}</span>`);
+  s = s.replace(/(^|\s)#([a-zA-Z0-9_\/-]+)/g, (m,pre,tag)=>`${pre}<a class="tag">#${tag}</a>`);
+  return s;
+}
+function renderMarkdown(text){
+  let body = text;
+  let frontmatterHtml = '';
+  if(body.startsWith('---\n')){
+    const end = body.indexOf('\n---', 4);
+    if(end !== -1){
+      const fm = body.slice(4, end);
+      frontmatterHtml = `<div class="frontmatter">${escapeHtml(fm)}</div>`;
+      body = body.slice(end+4).replace(/^\n/, '');
+    }
+  }
+  const lines = body.split('\n');
+  let html = frontmatterHtml;
+  let inCode = false, codeBuf = [];
+  let inList = false, listType = '';
+  let calloutBuf = null;
+
+  function closeList(){ if(inList){ html += listType==='ol' ? '</ol>' : '</ul>'; inList=false; } }
+  function closeCallout(){ if(calloutBuf){ html += `<div class="callout"><div class="callout-title">${calloutBuf.title}</div>${calloutBuf.body}</div>`; calloutBuf=null; } }
+
+  for(let raw of lines){
+    if(raw.trim().startsWith('```')){
+      if(inCode){ html += `<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`; codeBuf=[]; inCode=false; }
+      else { closeList(); closeCallout(); inCode = true; }
+      continue;
+    }
+    if(inCode){ codeBuf.push(raw); continue; }
+
+    const line = raw;
+    const calloutMatch = line.match(/^>\s*\[!(\w+)\]\s*(.*)$/);
+    if(calloutMatch){
+      closeList();
+      if(calloutBuf) closeCallout();
+      calloutBuf = { title: escapeHtml(calloutMatch[1].toUpperCase()) + (calloutMatch[2]?': '+inline(calloutMatch[2]):''), body:'' };
+      continue;
+    }
+    if(calloutBuf && line.startsWith('>')){
+      calloutBuf.body += `<p>${inline(line.replace(/^>\s?/,''))}</p>`;
+      continue;
+    } else if(calloutBuf){
+      closeCallout();
+    }
+
+    if(/^\s*---+\s*$/.test(line)){ closeList(); html += '<hr>'; continue; }
+
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if(h){ closeList(); html += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; continue; }
+
+    const task = line.match(/^(\s*)-\s+\[([ xX])\]\s+(.*)$/);
+    if(task){
+      if(!inList || listType!=='ul'){ closeList(); html+='<ul>'; inList=true; listType='ul'; }
+      const checked = task[2].toLowerCase()==='x';
+      html += `<li class="task"><input type="checkbox" disabled ${checked?'checked':''}><span>${inline(task[3])}</span></li>`;
+      continue;
+    }
+    const ul = line.match(/^(\s*)[-*]\s+(.*)$/);
+    if(ul){
+      if(!inList || listType!=='ul'){ closeList(); html+='<ul>'; inList=true; listType='ul'; }
+      html += `<li>${inline(ul[2])}</li>`;
+      continue;
+    }
+    const ol = line.match(/^(\s*)\d+\.\s+(.*)$/);
+    if(ol){
+      if(!inList || listType!=='ol'){ closeList(); html+='<ol>'; inList=true; listType='ol'; }
+      html += `<li>${inline(ol[2])}</li>`;
+      continue;
+    }
+    const bq = line.match(/^>\s?(.*)$/);
+    if(bq){ closeList(); html += `<blockquote>${inline(bq[1])}</blockquote>`; continue; }
+
+    closeList();
+    if(line.trim() === ''){ continue; }
+    html += `<p>${inline(line)}</p>`;
+  }
+  closeList(); closeCallout();
+  if(inCode) html += `<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`;
+  return html || '<p style="color:var(--muted)">Empty note.</p>';
+}
+
+// ---------- UI wiring ----------
+function setStatus(msg, cls){
+  els.status.textContent = msg;
+  els.status.className = cls||'';
+}
+
+function renderPreview(){
+  els.preview.innerHTML = renderMarkdown(cache[currentType].content);
+}
+
+function setMode(mode){
+  state.mode = mode;
+  const entry = cache[currentType];
+  if(mode === 'edit'){
+    els.raw.style.display = 'block';
+    els.preview.style.display = 'none';
+    els.raw.value = entry.content;
+    els.raw.focus();
+    els.modeBtn.textContent = 'Preview';
+  } else {
+    if(els.raw.style.display === 'block') entry.content = els.raw.value;
+    renderPreview();
+    els.raw.style.display = 'none';
+    els.preview.style.display = 'block';
+    els.modeBtn.textContent = 'Edit';
+  }
+}
+els.modeBtn.onclick = async () => {
+  if(state.mode === 'edit'){ setMode('preview'); await save(); }
+  else setMode('edit');
+};
+
+async function save(type){
+  type = type || currentType;
+  const entry = cache[type];
+  if(!entry || !entry.dirty || !entry.path) return;
+  try{
+    if(type === currentType) setStatus('Saving…', 'saving');
+    await uploadFile(entry.path, entry.content, 'overwrite');
+    entry.dirty = false;
+    if(type === currentType) setStatus('Saved ✓');
+  }catch(e){
+    if(type === currentType) setStatus('Save failed — check connection', 'error');
+  }
+}
+els.saveBtn.onclick = () => {
+  if(state.mode==='edit') cache[currentType].content = els.raw.value;
+  cache[currentType].dirty = true;
+  save();
+};
+
+let autosaveTimer = null;
+const AUTOSAVE_DELAY = 1200; // ms of no typing before saving to Dropbox
+els.raw.addEventListener('input', () => {
+  const entry = cache[currentType];
+  entry.dirty = true;
+  entry.content = els.raw.value;
+  setStatus('Typing…');
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => save(currentType), AUTOSAVE_DELAY);
+});
+
+document.addEventListener('keydown', (e) => {
+  if((e.ctrlKey||e.metaKey) && e.key === 's'){
+    e.preventDefault();
+    if(state.mode==='edit') cache[currentType].content = els.raw.value;
+    cache[currentType].dirty = true;
+    save();
+  }
+});
+
+function updateTabBar(){
+  els.tabBar.querySelectorAll('.tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.type === currentType);
+  });
+  els.dateLabel.textContent = cache[currentType].label || '';
+}
+
+async function loadNote(type){
+  const cfg = NOTE_TYPES[type];
+  const entry = cache[type];
+  const { path, label } = cfg.pathFn();
+  entry.path = path;
+  entry.label = label;
+  updateTabBar();
+  setStatus('Loading…');
+  let content = await downloadFile(path);
+  if(content === null){
+    setStatus('No note found at '+path, 'error');
+    els.preview.innerHTML = `<p>No ${cfg.label.toLowerCase()} note exists yet at <code>${escapeHtml(path)}</code>.</p>
+      <button class="primary" id="createBtn">Create it</button>`;
+    els.editWrap.style.display = 'flex';
+    els.raw.style.display = 'none';
+    els.preview.style.display = 'block';
+    document.getElementById('createBtn').onclick = async () => {
+      const blank = `# ${label}\n\n`;
+      await uploadFile(path, blank, 'add');
+      entry.content = blank;
+      entry.loaded = true;
+      setStatus('Created');
+      setMode('preview');
+    };
+    return;
+  }
+  entry.content = content;
+  entry.loaded = true;
+  els.editWrap.style.display = 'flex';
+  setMode('preview');
+  setStatus('Loaded');
+}
+
+async function switchTab(type){
+  if(type === currentType) return;
+  // flush any pending edit on the tab we're leaving
+  if(state.mode==='edit') cache[currentType].content = els.raw.value;
+  clearTimeout(autosaveTimer);
+  await save(currentType);
+  currentType = type;
+  updateTabBar();
+  if(cache[type].loaded){
+    setMode('preview');
+    setStatus('');
+  } else {
+    await loadNote(type);
+  }
+}
+els.tabBar.querySelectorAll('.tab').forEach(btn => {
+  btn.onclick = () => switchTab(btn.dataset.type);
+});
+
+els.connectBtn.onclick = beginAuth;
+
+// ---------- boot ----------
+(async function boot(){
+  const params = new URLSearchParams(location.search);
+  if(params.has('code')){
+    setStatus('Connecting…');
+    try{ await exchangeCode(params.get('code')); }
+    catch(e){ setStatus('Dropbox connection failed', 'error'); return; }
+  }
+  if(isConnected()){
+    els.connectScreen.style.display = 'none';
+    els.tabBar.classList.add('visible');
+    updateTabBar();
+    await loadNote(currentType);
+  } else {
+    els.connectScreen.style.display = 'flex';
+  }
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+})();
+</script>
+</body>
+</html>
