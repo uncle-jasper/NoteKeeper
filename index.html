@@ -38,6 +38,11 @@
   header .actions{display:flex; align-items:center; gap:8px;}
   #tabBar{display:none; gap:4px; padding:8px 16px 0; flex-shrink:0;}
   #tabBar.visible{display:flex;}
+  #navRow{display:none; align-items:center; gap:8px; padding:6px 16px 0; flex-shrink:0;}
+  #navRow.visible{display:flex;}
+  #navRow .navLabel{font-size:12px; color:var(--muted); min-width:90px;}
+  #navRow button{padding:4px 10px; font-size:13px;}
+  #navRow #todayBtn{font-size:12px; color:var(--muted);}
   #tabBar button{
     background:transparent; border:1px solid transparent; border-bottom:none;
     border-radius:6px 6px 0 0; padding:6px 14px; font-size:13px; color:var(--muted);
@@ -97,16 +102,39 @@
   #preview strong{font-weight:700;}
   #preview em{font-style:italic;}
   .hint{font-size:11px; color:var(--muted); padding:0 16px 10px;}
+  #lockScreen{
+    position:fixed; inset:0; background:var(--bg); z-index:1000;
+    display:none; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; text-align:center; padding:24px;
+  }
+  #lockScreen .lockIcon{font-size:38px;}
+  #lockScreen h2{margin:0; font-size:16px; font-weight:600;}
+  #lockScreen .sub{color:var(--muted); font-size:12px; max-width:280px; margin:0;}
+  #pinInput{
+    font-family:var(--note-font); font-size:26px; letter-spacing:10px; text-align:center;
+    width:170px; padding:10px 0 10px 10px; background:var(--panel); color:var(--text);
+    border:1px solid var(--border); border-radius:8px; outline:none;
+  }
+  #pinInput:focus{border-color:var(--accent);}
+  #lockError{color:var(--danger); font-size:12px; min-height:16px;}
 </style>
 </head>
 <body data-theme="dark">
 
+<div id="lockScreen">
+  <div class="lockIcon">🔒</div>
+  <h2 id="lockTitle">Enter PIN</h2>
+  <p class="sub" id="lockSub">NoteKeeper is locked. Enter your 6-digit PIN to continue.</p>
+  <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="pinInput" autocomplete="off">
+  <div id="lockError"></div>
+</div>
+
 <header>
   <div class="title">
     <h1 id="noteTitle">📓 NoteKeeper</h1>
-    <span class="date" id="dateLabel"></span>
   </div>
   <div class="actions">
+    <button class="icon" id="lockBtn" title="Lock now">🔒</button>
     <button class="icon" id="themeBtn" title="Toggle theme">🌓</button>
     <button class="icon" id="fontDownBtn" title="Smaller font">−</button>
     <button class="icon" id="fontUpBtn" title="Larger font">+</button>
@@ -119,6 +147,13 @@
   <button class="tab" data-type="daily">Daily</button>
   <button class="tab" data-type="weekly">Weekly</button>
   <button class="tab" data-type="monthly">Monthly</button>
+</div>
+
+<div id="navRow">
+  <button class="icon" id="prevBtn" title="Previous">←</button>
+  <span class="navLabel" id="dateLabel"></span>
+  <button class="icon" id="nextBtn" title="Next">→</button>
+  <button id="todayBtn" title="Jump to current">Today</button>
 </div>
 
 <div id="status"></div>
@@ -154,8 +189,9 @@ const REDIRECT_URI = location.href.split('?')[0].split('#')[0];
 
 function pad(n){ return String(n).padStart(2,'0'); }
 
-function dailyPath(){
+function dailyPath(offset=0){
   const d = new Date();
+  d.setDate(d.getDate() + offset);
   const y = d.getFullYear(), m = pad(d.getMonth()+1), day = pad(d.getDate());
   return { path: `${NOTE_TYPES.daily.folder}${y}-${m}-${day}.md`, label: `${y}-${m}-${day}` };
 }
@@ -169,14 +205,17 @@ function isoWeekInfo(d){
   const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
   return { isoYear: date.getUTCFullYear(), isoWeek: weekNo };
 }
-function weeklyPath(){
-  const { isoYear, isoWeek } = isoWeekInfo(new Date());
+function weeklyPath(offset=0){
+  const d = new Date();
+  d.setDate(d.getDate() + offset*7);
+  const { isoYear, isoWeek } = isoWeekInfo(d);
   const label = `${isoYear}-W${pad(isoWeek)}`;
   return { path: `${NOTE_TYPES.weekly.folder}${label}.md`, label };
 }
 
-function monthlyPath(){
+function monthlyPath(offset=0){
   const d = new Date();
+  d.setMonth(d.getMonth() + offset);
   const label = `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
   return { path: `${NOTE_TYPES.monthly.folder}${label}.md`, label };
 }
@@ -194,13 +233,23 @@ const els = {
   dateLabel: document.getElementById('dateLabel'),
   noteTitle: document.getElementById('noteTitle'),
   tabBar: document.getElementById('tabBar'),
+  navRow: document.getElementById('navRow'),
+  prevBtn: document.getElementById('prevBtn'),
+  nextBtn: document.getElementById('nextBtn'),
+  todayBtn: document.getElementById('todayBtn'),
+  lockScreen: document.getElementById('lockScreen'),
+  lockBtn: document.getElementById('lockBtn'),
+  lockTitle: document.getElementById('lockTitle'),
+  lockSub: document.getElementById('lockSub'),
+  pinInput: document.getElementById('pinInput'),
+  lockError: document.getElementById('lockError'),
 };
 
 // One cache entry per note type so switching tabs never loses unsaved edits.
 const cache = {
-  daily:   { path:'', label:'', content:'', dirty:false, loaded:false },
-  weekly:  { path:'', label:'', content:'', dirty:false, loaded:false },
-  monthly: { path:'', label:'', content:'', dirty:false, loaded:false },
+  daily:   { path:'', label:'', content:'', dirty:false, loaded:false, offset:0 },
+  weekly:  { path:'', label:'', content:'', dirty:false, loaded:false, offset:0 },
+  monthly: { path:'', label:'', content:'', dirty:false, loaded:false, offset:0 },
 };
 let currentType = 'daily';
 let state = { mode:'preview' }; // mode is shared UI state, not per-type
@@ -507,7 +556,7 @@ function updateTabBar(){
 async function loadNote(type){
   const cfg = NOTE_TYPES[type];
   const entry = cache[type];
-  const { path, label } = cfg.pathFn();
+  const { path, label } = cfg.pathFn(entry.offset);
   entry.path = path;
   entry.label = label;
   updateTabBar();
@@ -537,6 +586,20 @@ async function loadNote(type){
   setStatus('Loaded');
 }
 
+async function navigate(type, action){
+  const entry = cache[type];
+  // flush any pending edit before we swap what this tab points to
+  if(type === currentType && state.mode==='edit') entry.content = els.raw.value;
+  clearTimeout(autosaveTimer);
+  if(entry.dirty) await save(type);
+  entry.offset = action === 'today' ? 0 : entry.offset + action;
+  entry.loaded = false;
+  await loadNote(type);
+}
+els.prevBtn.onclick = () => navigate(currentType, -1);
+els.nextBtn.onclick = () => navigate(currentType, 1);
+els.todayBtn.onclick = () => navigate(currentType, 'today');
+
 async function switchTab(type){
   if(type === currentType) return;
   // flush any pending edit on the tab we're leaving
@@ -558,8 +621,80 @@ els.tabBar.querySelectorAll('.tab').forEach(btn => {
 
 els.connectBtn.onclick = beginAuth;
 
+// ---------- PIN lock ----------
+async function sha256Hex(str){
+  const enc = new TextEncoder().encode(str);
+  const digest = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+let lockMode = 'unlock'; // 'unlock' | 'setup1' | 'setup2'
+let pendingPin = null;
+let appStarted = false;
+
+function isPinSet(){ return !!localStorage.getItem('nk_pin_hash'); }
+
+function showLock(mode){
+  lockMode = mode;
+  els.pinInput.value = '';
+  els.lockError.textContent = '';
+  if(mode === 'unlock'){
+    els.lockTitle.textContent = 'Enter PIN';
+    els.lockSub.textContent = 'NoteKeeper is locked. Enter your 6-digit PIN to continue.';
+  } else if(mode === 'setup1'){
+    els.lockTitle.textContent = 'Set a 6-digit PIN';
+    els.lockSub.textContent = 'This protects NoteKeeper if someone else has access to this computer.';
+  } else {
+    els.lockTitle.textContent = 'Confirm PIN';
+    els.lockSub.textContent = 'Enter the same 6 digits again.';
+  }
+  els.lockScreen.style.display = 'flex';
+  els.pinInput.focus();
+}
+function hideLock(){
+  els.lockScreen.style.display = 'none';
+}
+
+async function handlePinComplete(value){
+  if(lockMode === 'unlock'){
+    const hash = await sha256Hex(value);
+    if(hash === localStorage.getItem('nk_pin_hash')){
+      hideLock();
+      if(!appStarted){ appStarted = true; startApp(); }
+    } else {
+      els.lockError.textContent = 'Incorrect PIN';
+      els.pinInput.value = '';
+    }
+  } else if(lockMode === 'setup1'){
+    pendingPin = value;
+    showLock('setup2');
+  } else if(lockMode === 'setup2'){
+    if(value === pendingPin){
+      localStorage.setItem('nk_pin_hash', await sha256Hex(value));
+      pendingPin = null;
+      hideLock();
+      if(!appStarted){ appStarted = true; startApp(); }
+    } else {
+      els.lockError.textContent = "PINs didn't match — try again";
+      pendingPin = null;
+      showLock('setup1');
+    }
+  }
+}
+els.pinInput.addEventListener('input', () => {
+  els.pinInput.value = els.pinInput.value.replace(/\D/g,'').slice(0,6);
+  if(els.pinInput.value.length === 6) handlePinComplete(els.pinInput.value);
+});
+els.lockBtn.onclick = async () => {
+  if(!isPinSet()) return; // nothing to lock behind yet
+  if(state.mode==='edit') cache[currentType].content = els.raw.value;
+  clearTimeout(autosaveTimer);
+  await save(currentType);
+  showLock('unlock');
+};
+
 // ---------- boot ----------
-(async function boot(){
+async function startApp(){
   const params = new URLSearchParams(location.search);
   if(params.has('code')){
     setStatus('Connecting…');
@@ -569,6 +704,7 @@ els.connectBtn.onclick = beginAuth;
   if(isConnected()){
     els.connectScreen.style.display = 'none';
     els.tabBar.classList.add('visible');
+    els.navRow.classList.add('visible');
     updateTabBar();
     await loadNote(currentType);
   } else {
@@ -577,7 +713,14 @@ els.connectBtn.onclick = beginAuth;
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(()=>{});
   }
-})();
+}
+
+// Entry point: gate behind the PIN before anything else runs.
+if(isPinSet()){
+  showLock('unlock');
+} else {
+  showLock('setup1');
+}
 </script>
 </body>
 </html>
