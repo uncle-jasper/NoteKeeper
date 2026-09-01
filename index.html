@@ -519,6 +519,9 @@ document.addEventListener('click', (e) => {
   if(state.mode !== 'edit') return;
   if(els.editWrap.contains(e.target)) return;   // click was inside the note itself
   if(e.target === els.modeBtn) return;           // that button already manages its own transition
+  if(els.tabBar.contains(e.target)) return;      // tab switch already manages its own transition
+  if(els.navRow.contains(e.target)) return;      // prev/next/today already manage their own transition
+  if(e.target === els.lockBtn) return;            // locking already flushes/saves itself
   cache[currentType].content = els.raw.value;
   clearTimeout(autosaveTimer);
   setMode('preview');
