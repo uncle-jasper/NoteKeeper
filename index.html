@@ -549,6 +549,136 @@ els.saveBtn.onclick = () => {
 
 let autosaveTimer = null;
 const AUTOSAVE_DELAY = 1200; // ms of no typing before saving to Dropbox
+
+// ---------- Obsidian-style editor conveniences ----------
+function lineStart(val, pos){ const i = val.lastIndexOf('\n', pos-1); return i===-1 ? 0 : i+1; }
+function lineEnd(val, pos){ const i = val.indexOf('\n', pos); return i===-1 ? val.length : i; }
+function replaceRange(el, start, end, text){
+  el.focus();
+  el.setSelectionRange(start, end);
+  document.execCommand('insertText', false, text); // keeps native undo/redo working
+}
+
+els.raw.addEventListener('keydown', (e) => {
+  const el = els.raw;
+
+  // --- Enter: continue lists, or exit an empty one ---
+  if(e.key === 'Enter' && !e.shiftKey && el.selectionStart === el.selectionEnd){
+    const val = el.value, pos = el.selectionStart;
+    const ls = lineStart(val, pos);
+    const currentLine = val.slice(ls, pos);
+    let m;
+
+    m = currentLine.match(/^(\s*)-\s\[[ xX]\]\s(.*)$/); // checkbox
+    if(m){
+      e.preventDefault();
+      if(m[2].trim() === '') replaceRange(el, ls, pos, '');
+      else replaceRange(el, pos, pos, `\n${m[1]}- [ ] `);
+      return;
+    }
+    m = currentLine.match(/^(\s*)([-*])\s(.*)$/); // bullet
+    if(m){
+      e.preventDefault();
+      if(m[3].trim() === '') replaceRange(el, ls, pos, '');
+      else replaceRange(el, pos, pos, `\n${m[1]}${m[2]} `);
+      return;
+    }
+    m = currentLine.match(/^(\s*)(\d+)([.)])\s(.*)$/); // numbered
+    if(m){
+      e.preventDefault();
+      if(m[4].trim() === '') replaceRange(el, ls, pos, '');
+      else replaceRange(el, pos, pos, `\n${m[1]}${parseInt(m[2],10)+1}${m[3]} `);
+      return;
+    }
+    m = currentLine.match(/^(\s*)>\s(.*)$/); // blockquote
+    if(m){
+      e.preventDefault();
+      if(m[2].trim() === '') replaceRange(el, ls, pos, '');
+      else replaceRange(el, pos, pos, `\n${m[1]}> `);
+      return;
+    }
+    return; // no list context — normal Enter
+  }
+
+  // --- Tab / Shift+Tab: indent or outdent a list line ---
+  if(e.key === 'Tab' && el.selectionStart === el.selectionEnd){
+    const val = el.value, pos = el.selectionStart;
+    const ls = lineStart(val, pos), le = lineEnd(val, pos);
+    const line = val.slice(ls, le);
+    if(/^\s*([-*]|\d+[.)]|>)\s/.test(line)){
+      e.preventDefault();
+      if(!e.shiftKey){
+        replaceRange(el, ls, ls, '  ');
+      } else {
+        const lead = line.match(/^ {1,2}/);
+        if(lead) replaceRange(el, ls, ls+lead[0].length, '');
+      }
+    }
+    return;
+  }
+
+  // --- Auto-pairing: brackets, quotes, backticks, */_  ---
+  if(!e.ctrlKey && !e.metaKey && !e.altKey){
+    const OPEN = {'(':')', '[':']', '{':'}'};
+    const CLOSERS = Object.values(OPEN);
+    const SYMMETRIC = ['"',"'",'`','*','_'];
+    const key = e.key;
+    const pos = el.selectionStart, endPos = el.selectionEnd;
+    const val = el.value;
+
+    if(OPEN[key] !== undefined){
+      e.preventDefault();
+      if(pos !== endPos){
+        const sel = val.slice(pos, endPos);
+        replaceRange(el, pos, endPos, key + sel + OPEN[key]);
+        el.setSelectionRange(pos+1, pos+1+sel.length);
+      } else {
+        replaceRange(el, pos, pos, key + OPEN[key]);
+        el.setSelectionRange(pos+1, pos+1);
+      }
+      return;
+    }
+    if(CLOSERS.includes(key) && pos === endPos && val[pos] === key){
+      e.preventDefault();
+      el.setSelectionRange(pos+1, pos+1); // skip over instead of duplicating
+      return;
+    }
+    if(SYMMETRIC.includes(key)){
+      // Don't pair an apostrophe right after a letter/digit — that's a contraction (don't, it's), not a quote.
+      if(key === "'" && pos === endPos && /[A-Za-z0-9]/.test(val[pos-1] || '')) return;
+      if(pos !== endPos){
+        e.preventDefault();
+        const sel = val.slice(pos, endPos);
+        replaceRange(el, pos, endPos, key + sel + key);
+        el.setSelectionRange(pos+1, pos+1+sel.length);
+        return;
+      }
+      if(val[pos] === key){
+        e.preventDefault();
+        el.setSelectionRange(pos+1, pos+1);
+        return;
+      }
+      e.preventDefault();
+      replaceRange(el, pos, pos, key+key);
+      el.setSelectionRange(pos+1, pos+1);
+      return;
+    }
+  }
+
+  // --- Backspace between an auto-inserted empty pair deletes both ---
+  if(e.key === 'Backspace' && el.selectionStart === el.selectionEnd){
+    const pos = el.selectionStart, val = el.value;
+    if(pos > 0){
+      const pairMap = {'(':')', '[':']', '{':'}', '"':'"', "'":"'", '`':'`', '*':'*', '_':'_'};
+      const before = val[pos-1], after = val[pos];
+      if(pairMap[before] && after === pairMap[before]){
+        e.preventDefault();
+        replaceRange(el, pos-1, pos+1, '');
+      }
+    }
+  }
+});
+
 els.raw.addEventListener('input', () => {
   const entry = cache[currentType];
   entry.dirty = true;
