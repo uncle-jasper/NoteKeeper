@@ -410,9 +410,7 @@ function renderMarkdown(text){
       frontmatterHtml = `<div class="frontmatter">${escapeHtml(fm)}</div>`;
       const prefix = body.slice(0, end+4);
       bodyStartLine = prefix.split('\n').length;
-      let rest = body.slice(end+4);
-      if(/^\n/.test(rest)){ bodyStartLine += 1; rest = rest.replace(/^\n/, ''); }
-      body = rest;
+      body = body.slice(end+4).replace(/^\n/, '');
     }
   }
   const lines = body.split('\n');
