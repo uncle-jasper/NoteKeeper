@@ -402,12 +402,17 @@ function inline(md){
 function renderMarkdown(text){
   let body = text;
   let frontmatterHtml = '';
+  let bodyStartLine = 0;
   if(body.startsWith('---\n')){
     const end = body.indexOf('\n---', 4);
     if(end !== -1){
       const fm = body.slice(4, end);
       frontmatterHtml = `<div class="frontmatter">${escapeHtml(fm)}</div>`;
-      body = body.slice(end+4).replace(/^\n/, '');
+      const prefix = body.slice(0, end+4);
+      bodyStartLine = prefix.split('\n').length;
+      let rest = body.slice(end+4);
+      if(/^\n/.test(rest)){ bodyStartLine += 1; rest = rest.replace(/^\n/, ''); }
+      body = rest;
     }
   }
   const lines = body.split('\n');
@@ -419,7 +424,9 @@ function renderMarkdown(text){
   function closeList(){ if(inList){ html += listType==='ol' ? '</ol>' : '</ul>'; inList=false; } }
   function closeCallout(){ if(calloutBuf){ html += `<div class="callout"><div class="callout-title">${calloutBuf.title}</div>${calloutBuf.body}</div>`; calloutBuf=null; } }
 
-  for(let raw of lines){
+  for(let li=0; li<lines.length; li++){
+    const raw = lines[li];
+    const lineIdx = bodyStartLine + li;
     if(raw.trim().startsWith('```')){
       if(inCode){ html += `<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`; codeBuf=[]; inCode=false; }
       else { closeList(); closeCallout(); inCode = true; }
@@ -451,7 +458,7 @@ function renderMarkdown(text){
     if(task){
       if(!inList || listType!=='ul'){ closeList(); html+='<ul>'; inList=true; listType='ul'; }
       const checked = task[2].toLowerCase()==='x';
-      html += `<li class="task"><input type="checkbox" disabled ${checked?'checked':''}><span>${inline(task[3])}</span></li>`;
+      html += `<li class="task"><input type="checkbox" data-line="${lineIdx}" ${checked?'checked':''}><span>${inline(task[3])}</span></li>`;
       continue;
     }
     const ul = line.match(/^(\s*)[-*]\s+(.*)$/);
@@ -486,6 +493,24 @@ function setStatus(msg, cls){
 
 function renderPreview(){
   els.preview.innerHTML = renderMarkdown(cache[currentType].content);
+  wireTaskCheckboxes();
+}
+
+function wireTaskCheckboxes(){
+  els.preview.querySelectorAll('input[type=checkbox][data-line]').forEach(cb => {
+    cb.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't also trigger the preview's click-to-edit behavior
+      const idx = parseInt(cb.dataset.line, 10);
+      const entry = cache[currentType];
+      const linesArr = entry.content.split('\n');
+      if(linesArr[idx] === undefined) return;
+      const checked = cb.checked; // browser has already applied the toggle by this point
+      linesArr[idx] = linesArr[idx].replace(/^(\s*-\s\[)[ xX](\])/, `$1${checked ? 'x' : ' '}$2`);
+      entry.content = linesArr.join('\n');
+      entry.dirty = true;
+      save(currentType);
+    });
+  });
 }
 
 function setMode(mode){
@@ -526,6 +551,16 @@ document.addEventListener('click', (e) => {
   if(els.tabBar.contains(e.target)) return;      // tab switch already manages its own transition
   if(els.navRow.contains(e.target)) return;      // prev/next/today already manage their own transition
   if(e.target === els.lockBtn) return;            // locking already flushes/saves itself
+  cache[currentType].content = els.raw.value;
+  clearTimeout(autosaveTimer);
+  setMode('preview');
+  save();
+});
+
+// Also drop back to preview when the app/window loses focus entirely
+// (switching to another app, alt-tabbing, clicking outside the browser).
+window.addEventListener('blur', () => {
+  if(state.mode !== 'edit') return;
   cache[currentType].content = els.raw.value;
   clearTimeout(autosaveTimer);
   setMode('preview');
@@ -681,6 +716,26 @@ els.raw.addEventListener('keydown', (e) => {
       }
     }
   }
+});
+
+// Paste a URL over selected text to auto-format it as a markdown link (Ulysses-style).
+els.raw.addEventListener('paste', (e) => {
+  const el = els.raw;
+  if(el.selectionStart === el.selectionEnd) return; // no selection — let normal paste happen
+  const pasted = (e.clipboardData || window.clipboardData).getData('text');
+  if(!pasted) return;
+  const trimmed = pasted.trim();
+  if(!/^(https?:\/\/|www\.)\S+$/i.test(trimmed)) return; // not a URL — let normal paste happen
+  e.preventDefault();
+  const start = el.selectionStart, end = el.selectionEnd;
+  const selectedText = el.value.slice(start, end);
+  const url = trimmed.startsWith('www.') ? 'https://' + trimmed : trimmed;
+  const linkText = `[${selectedText}](${url})`;
+  replaceRange(el, start, end, linkText);
+  const newPos = start + linkText.length;
+  el.setSelectionRange(newPos, newPos);
+  cache[currentType].content = el.value;
+  cache[currentType].dirty = true;
 });
 
 els.raw.addEventListener('input', () => {
