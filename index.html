@@ -195,7 +195,8 @@ function dailyPath(offset=0){
   const d = new Date();
   d.setDate(d.getDate() + offset);
   const y = d.getFullYear(), m = pad(d.getMonth()+1), day = pad(d.getDate());
-  return { path: `${NOTE_TYPES.daily.folder}${y}-${m}-${day}.md`, label: `${y}-${m}-${day}` };
+  // Daily notes now live in a YYYY-MM subfolder, e.g. Daily/2026-09/2026-09-25.md
+  return { path: `${NOTE_TYPES.daily.folder}${y}-${m}/${y}-${m}-${day}.md`, label: `${y}-${m}-${day}` };
 }
 
 function isoWeekInfo(d){
@@ -212,14 +213,17 @@ function weeklyPath(offset=0){
   d.setDate(d.getDate() + offset*7);
   const { isoYear, isoWeek } = isoWeekInfo(d);
   const label = `${isoYear}-W${pad(isoWeek)}`;
-  return { path: `${NOTE_TYPES.weekly.folder}${label}.md`, label };
+  // Weekly notes now live in a YYYY subfolder, e.g. Weekly/2026/2026-W39.md
+  return { path: `${NOTE_TYPES.weekly.folder}${isoYear}/${label}.md`, label };
 }
 
 function monthlyPath(offset=0){
   const d = new Date();
   d.setMonth(d.getMonth() + offset);
-  const label = `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
-  return { path: `${NOTE_TYPES.monthly.folder}${label}.md`, label };
+  const y = d.getFullYear();
+  const label = `${y}-${pad(d.getMonth()+1)}`;
+  // Monthly notes now live in a YYYY subfolder, e.g. Monthly/2026/2026-09.md
+  return { path: `${NOTE_TYPES.monthly.folder}${y}/${label}.md`, label };
 }
 
 const els = {
