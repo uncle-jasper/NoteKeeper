@@ -68,13 +68,35 @@
   }
   #connectScreen p{color:var(--muted); font-size:13px; max-width:320px;}
   #editWrap{flex:1; overflow:hidden; display:flex; flex-direction:column; padding:0 16px 16px;}
-  textarea#raw{
-    flex:1; width:100%; resize:none; background:var(--panel); color:var(--text);
+  /* Styled editor: a highlighted <pre> sits behind a transparent-text textarea.
+     Both must have IDENTICAL metrics (font, size, padding, wrapping) so the
+     styling lines up with what you type. That's why headings are bold/colored
+     rather than larger: bigger text would drift out of alignment. */
+  #rawWrap{flex:1; position:relative; min-height:0;}
+  #hl, textarea#raw{
+    position:absolute; inset:0; margin:0; width:100%; height:100%;
     border:1px solid var(--border); border-radius:8px; padding:14px;
-    font-family:var(--note-font);
-    font-size:var(--note-size); line-height:1.6; outline:none;
-    white-space:pre-wrap; overflow-wrap:break-word;
+    font-family:var(--note-font); font-size:var(--note-size); line-height:1.6;
+    font-variant-ligatures:none; letter-spacing:normal; tab-size:4;
+    white-space:pre-wrap; overflow-wrap:break-word; word-break:normal;
   }
+  #hl{background:var(--panel); color:var(--text); overflow:hidden; pointer-events:none;}
+  textarea#raw{
+    resize:none; background:transparent; color:transparent; caret-color:var(--text);
+    -webkit-text-fill-color:transparent; outline:none; overflow-y:auto;
+  }
+  #hl .m{color:var(--muted); opacity:.75;}                       /* markdown markers */
+  #hl .h{font-weight:600; color:color-mix(in srgb, var(--accent) 65%, var(--text));}
+  #hl .b{font-weight:600;}
+  #hl .i{font-style:italic;}
+  #hl .c{color:color-mix(in srgb, var(--accent) 55%, var(--text)); background:var(--code-bg);}
+  #hl .l{color:color-mix(in srgb, var(--accent) 65%, var(--text));}
+  #hl .lu{color:color-mix(in srgb, var(--accent) 65%, var(--text)); text-decoration:underline;}
+  #hl .t{color:var(--accent);}
+  #hl .q{color:var(--muted); font-style:italic;}
+  #hl .fm{color:var(--muted);}
+  #hl .done{color:var(--muted); text-decoration:line-through;}
+  #hl .bx{color:var(--accent);}
   #preview{
     flex:1; overflow-y:auto; background:var(--panel); border:1px solid var(--border);
     border-radius:8px; padding:20px 24px; line-height:1.65;
@@ -86,8 +108,16 @@
   #preview h3{font-size:1.15em;}
   #preview p{margin:.6em 0;}
   #preview ul,#preview ol{margin:.4em 0; padding-left:1.6em;}
-  #preview li{margin:.15em 0;}
-  #preview li.task{list-style:none; margin-left:-1.6em; display:flex; gap:.5em; align-items:flex-start;}
+  #preview li{margin:.15em 0; margin-left:calc(var(--lvl,0) * 1.5em);}
+  #preview li.task{list-style:none; margin-left:calc(-1.6em + var(--lvl,0) * 1.5em); display:flex; gap:.5em; align-items:flex-start;}
+  #preview .foldable{position:relative;}
+  #preview .fold-caret{position:absolute; left:-1.5em; top:0; width:1.2em; text-align:center; cursor:pointer; color:var(--muted); font-size:.85em; line-height:inherit; opacity:0; user-select:none; transition:opacity .12s, transform .12s;}
+  #preview li .fold-caret{left:-2.3em;}
+  #preview li.task .fold-caret{left:-1.3em;}
+  #preview .foldable:hover > .fold-caret, #preview .foldable.collapsed > .fold-caret{opacity:.8;}
+  #preview .foldable.collapsed > .fold-caret{transform:rotate(-90deg);}
+  @media (hover:none){ #preview .fold-caret{opacity:.5;} }
+  #preview .fold-hidden{display:none !important;}
   #preview li.task input{margin-top:.3em; cursor:pointer;}
   #preview code{background:var(--code-bg); padding:.1em .35em; border-radius:4px; font-size:.9em; font-family:ui-monospace,Menlo,Consolas,monospace;}
   #preview pre{background:var(--code-bg); padding:12px 14px; border-radius:8px; overflow-x:auto;}
@@ -168,7 +198,10 @@
   </div>
 
   <div id="editWrap" style="display:none;">
-    <textarea id="raw" spellcheck="false" wrap="soft" style="display:none;"></textarea>
+    <div id="rawWrap" style="display:none;">
+      <pre id="hl" aria-hidden="true"></pre>
+      <textarea id="raw" spellcheck="false" wrap="soft"></textarea>
+    </div>
     <div id="preview"></div>
   </div>
 </main>
@@ -231,6 +264,8 @@ const els = {
   connectBtn: document.getElementById('connectBtn'),
   editWrap: document.getElementById('editWrap'),
   raw: document.getElementById('raw'),
+  rawWrap: document.getElementById('rawWrap'),
+  hl: document.getElementById('hl'),
   preview: document.getElementById('preview'),
   status: document.getElementById('status'),
   modeBtn: document.getElementById('modeBtn'),
@@ -421,9 +456,17 @@ function renderMarkdown(text){
   let html = frontmatterHtml;
   let inCode = false, codeBuf = [];
   let inList = false, listType = '';
+  let listStack = [];   // indent widths of the currently open nesting levels
   let calloutBuf = null;
 
-  function closeList(){ if(inList){ html += listType==='ol' ? '</ol>' : '</ul>'; inList=false; } }
+  function closeList(){ if(inList){ html += listType==='ol' ? '</ol>' : '</ul>'; inList=false; } listStack = []; }
+  // Turn a line's leading whitespace into a nesting level (0 = top level)
+  function listLevel(ws){
+    const w = ws.replace(/\t/g, '    ').length;
+    while(listStack.length && w < listStack[listStack.length-1]) listStack.pop();
+    if(!listStack.length || w > listStack[listStack.length-1]) listStack.push(w);
+    return listStack.length - 1;
+  }
   function closeCallout(){ if(calloutBuf){ html += `<div class="callout"><div class="callout-title">${calloutBuf.title}</div>${calloutBuf.body}</div>`; calloutBuf=null; } }
 
   for(let li=0; li<lines.length; li++){
@@ -454,25 +497,28 @@ function renderMarkdown(text){
     if(/^\s*---+\s*$/.test(line)){ closeList(); html += '<hr>'; continue; }
 
     const h = line.match(/^(#{1,4})\s+(.*)$/);
-    if(h){ closeList(); html += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; continue; }
+    if(h){ closeList(); html += `<h${h[1].length} data-line="${lineIdx}" data-level="${h[1].length}">${inline(h[2])}</h${h[1].length}>`; continue; }
 
     const task = line.match(/^(\s*)-\s+\[([ xX])\]\s+(.*)$/);
     if(task){
       if(!inList || listType!=='ul'){ closeList(); html+='<ul>'; inList=true; listType='ul'; }
       const checked = task[2].toLowerCase()==='x';
-      html += `<li class="task"><input type="checkbox" data-line="${lineIdx}" ${checked?'checked':''}><span>${inline(task[3])}</span></li>`;
+      const lvl = listLevel(task[1]);
+      html += `<li class="task" data-line="${lineIdx}" data-lvl="${lvl}" style="--lvl:${lvl}"><input type="checkbox" data-line="${lineIdx}" ${checked?'checked':''}><span>${inline(task[3])}</span></li>`;
       continue;
     }
     const ul = line.match(/^(\s*)[-*]\s+(.*)$/);
     if(ul){
       if(!inList || listType!=='ul'){ closeList(); html+='<ul>'; inList=true; listType='ul'; }
-      html += `<li>${inline(ul[2])}</li>`;
+      const lvl = listLevel(ul[1]);
+      html += `<li data-line="${lineIdx}" data-lvl="${lvl}" style="--lvl:${lvl}">${inline(ul[2])}</li>`;
       continue;
     }
     const ol = line.match(/^(\s*)\d+\.\s+(.*)$/);
     if(ol){
       if(!inList || listType!=='ol'){ closeList(); html+='<ol>'; inList=true; listType='ol'; }
-      html += `<li>${inline(ol[2])}</li>`;
+      const lvl = listLevel(ol[1]);
+      html += `<li data-line="${lineIdx}" data-lvl="${lvl}" style="--lvl:${lvl}">${inline(ol[2])}</li>`;
       continue;
     }
     const bq = line.match(/^>\s?(.*)$/);
@@ -496,6 +542,74 @@ function setStatus(msg, cls){
 function renderPreview(){
   els.preview.innerHTML = renderMarkdown(cache[currentType].content);
   wireTaskCheckboxes();
+  setupFolding();
+}
+
+// ---------- Collapsible headings and bullets (preview only) ----------
+// Fold state lives in memory per tab and is keyed by source line number.
+const foldState = { daily: new Set(), weekly: new Set(), monthly: new Set() };
+
+function setupFolding(){
+  const folded = foldState[currentType];
+  // Headings: foldable if anything follows before the next heading of same/higher level
+  const kids = Array.from(els.preview.children);
+  kids.forEach((el, i) => {
+    if(!/^H[1-4]$/.test(el.tagName)) return;
+    const next = kids[i+1];
+    const lvl = +el.dataset.level;
+    const hasBody = next && !(/^H[1-4]$/.test(next.tagName) && +next.dataset.level <= lvl);
+    if(hasBody) addCaret(el);
+  });
+  // List items: foldable if the next item in the same list is nested deeper
+  els.preview.querySelectorAll('ul, ol').forEach(list => {
+    const items = Array.from(list.children).filter(c => c.tagName === 'LI');
+    items.forEach((li, i) => {
+      const next = items[i+1];
+      if(next && +next.dataset.lvl > +li.dataset.lvl) addCaret(li);
+    });
+  });
+  applyFolds();
+}
+
+function addCaret(el){
+  const c = document.createElement('span');
+  c.className = 'fold-caret';
+  c.textContent = '▾';
+  c.addEventListener('click', (e) => {
+    e.stopPropagation(); // don't trigger click-to-edit
+    const set = foldState[currentType];
+    const key = el.dataset.line;
+    if(set.has(key)) set.delete(key); else set.add(key);
+    applyFolds();
+  });
+  el.insertBefore(c, el.firstChild);
+  el.classList.add('foldable');
+}
+
+function applyFolds(){
+  const folded = foldState[currentType];
+  els.preview.querySelectorAll('.fold-hidden').forEach(e => e.classList.remove('fold-hidden'));
+  els.preview.querySelectorAll('.foldable').forEach(e => e.classList.toggle('collapsed', folded.has(e.dataset.line)));
+  // Headings
+  const kids = Array.from(els.preview.children);
+  kids.forEach((el, i) => {
+    if(!el.classList.contains('collapsed') || !/^H[1-4]$/.test(el.tagName)) return;
+    const lvl = +el.dataset.level;
+    for(let j=i+1; j<kids.length; j++){
+      const k = kids[j];
+      if(/^H[1-4]$/.test(k.tagName) && +k.dataset.level <= lvl) break;
+      k.classList.add('fold-hidden');
+    }
+  });
+  // List items
+  els.preview.querySelectorAll('ul, ol').forEach(list => {
+    const items = Array.from(list.children).filter(c => c.tagName === 'LI');
+    items.forEach((li, i) => {
+      if(!li.classList.contains('collapsed')) return;
+      const lvl = +li.dataset.lvl;
+      for(let j=i+1; j<items.length && +items[j].dataset.lvl > lvl; j++) items[j].classList.add('fold-hidden');
+    });
+  });
 }
 
 function wireTaskCheckboxes(){
@@ -519,15 +633,16 @@ function setMode(mode){
   state.mode = mode;
   const entry = cache[currentType];
   if(mode === 'edit'){
-    els.raw.style.display = 'block';
+    els.rawWrap.style.display = 'block';
     els.preview.style.display = 'none';
     els.raw.value = entry.content;
+    updateHighlight();
     els.raw.focus();
     els.modeBtn.textContent = 'Preview';
   } else {
-    if(els.raw.style.display === 'block') entry.content = els.raw.value;
+    if(els.rawWrap.style.display === 'block') entry.content = els.raw.value;
     renderPreview();
-    els.raw.style.display = 'none';
+    els.rawWrap.style.display = 'none';
     els.preview.style.display = 'block';
     els.modeBtn.textContent = 'Edit';
   }
@@ -740,7 +855,75 @@ els.raw.addEventListener('paste', (e) => {
   cache[currentType].dirty = true;
 });
 
+// ---------- Styled editor: syntax highlighting behind the textarea ----------
+// Every character of the text is preserved exactly (only wrapped in spans), so the
+// highlighted layer always lines up with the textarea above it.
+function hlInline(s){
+  const stash = [];
+  const keep = (html) => { stash.push(html); return '\u0000' + (stash.length-1) + '\u0000'; };
+  s = escapeHtml(s);
+  s = s.replace(/`([^`]+)`/g, (m,c)=>keep(`<span class="m">\`</span><span class="c">${c}</span><span class="m">\`</span>`));
+  s = s.replace(/\[\[([^\]]+)\]\]/g, (m,c)=>keep(`<span class="m">[[</span><span class="l">${c}</span><span class="m">]]</span>`));
+  s = s.replace(/\[([^\[\]]+)\]\(([^()\s]+)\)/g, (m,t,u)=>keep(`<span class="m">[</span><span class="lu">${t}</span><span class="m">](${u})</span>`));
+  s = s.replace(/\*\*(.+?)\*\*/g, '<span class="m">**</span><span class="b">$1</span><span class="m">**</span>');
+  s = s.replace(/(?<!\*)\*(?!\*)([^*]+)\*(?!\*)/g, '<span class="m">*</span><span class="i">$1</span><span class="m">*</span>');
+  s = s.replace(/(^|\s)(#[a-zA-Z0-9_\/-]+)/g, '$1<span class="t">$2</span>');
+  return s.replace(/\u0000(\d+)\u0000/g, (m,i)=>stash[+i]);
+}
+function highlightMarkdown(text){
+  const lines = text.split('\n');
+  const out = [];
+  let i = 0;
+  if(lines[0] === '---'){            // frontmatter block
+    let end = -1;
+    for(let k=1; k<lines.length; k++){ if(lines[k] === '---'){ end = k; break; } }
+    if(end !== -1){
+      for(; i<=end; i++) out.push(`<span class="fm">${escapeHtml(lines[i])}</span>`);
+    }
+  }
+  let inCode = false;
+  for(; i<lines.length; i++){
+    const ln = lines[i];
+    if(/^\s*```/.test(ln)){ inCode = !inCode; out.push(`<span class="m">${escapeHtml(ln)}</span>`); continue; }
+    if(inCode){ out.push(`<span class="c">${escapeHtml(ln)}</span>`); continue; }
+    let m;
+    if((m = ln.match(/^(#{1,6})(\s+)(.*)$/))){
+      out.push(`<span class="m">${m[1]}</span>${m[2]}<span class="h">${hlInline(m[3])}</span>`); continue;
+    }
+    if(/^\s*---+\s*$/.test(ln)){ out.push(`<span class="m">${escapeHtml(ln)}</span>`); continue; }
+    if((m = ln.match(/^(\s*)([-*])(\s+)\[([ xX])\](\s+)(.*)$/))){
+      const done = m[4].toLowerCase() === 'x';
+      out.push(`${m[1]}<span class="m">${m[2]}</span>${m[3]}<span class="bx">[${m[4]}]</span>${m[5]}` +
+               (done ? `<span class="done">${hlInline(m[6])}</span>` : hlInline(m[6]))); continue;
+    }
+    if((m = ln.match(/^(\s*)([-*]|\d+\.)(\s+)(.*)$/))){
+      out.push(`${m[1]}<span class="l">${m[2]}</span>${m[3]}${hlInline(m[4])}`); continue;
+    }
+    if((m = ln.match(/^(>\s?)(.*)$/))){
+      out.push(`<span class="m">${escapeHtml(m[1])}</span><span class="q">${hlInline(m[2])}</span>`); continue;
+    }
+    out.push(hlInline(ln));
+  }
+  let html = out.join('\n');
+  if(text.endsWith('\n')) html += ' ';   // keep the trailing blank line the same height as the textarea's
+  return html;
+}
+function syncHighlightScroll(){
+  els.hl.scrollTop = els.raw.scrollTop;
+  els.hl.scrollLeft = els.raw.scrollLeft;
+  // If the textarea shows a scrollbar, narrow the highlight layer by the same amount so lines wrap identically
+  const sb = Math.max(0, els.raw.offsetWidth - els.raw.clientWidth - 2);
+  els.hl.style.paddingRight = (14 + sb) + 'px';
+}
+function updateHighlight(){
+  els.hl.innerHTML = highlightMarkdown(els.raw.value);
+  syncHighlightScroll();
+}
+els.raw.addEventListener('scroll', syncHighlightScroll);
+window.addEventListener('resize', () => { if(state.mode === 'edit') syncHighlightScroll(); });
+
 els.raw.addEventListener('input', () => {
+  updateHighlight();
   const entry = cache[currentType];
   entry.dirty = true;
   entry.content = els.raw.value;
@@ -779,7 +962,7 @@ async function loadNote(type){
     els.preview.innerHTML = `<p>No ${cfg.label.toLowerCase()} note exists yet at <code>${escapeHtml(path)}</code>.</p>
       <button class="primary" id="createBtn">Create it</button>`;
     els.editWrap.style.display = 'flex';
-    els.raw.style.display = 'none';
+    els.rawWrap.style.display = 'none';
     els.preview.style.display = 'block';
     document.getElementById('createBtn').onclick = async () => {
       const blank = `# ${label}\n\n`;
