@@ -1606,7 +1606,13 @@ function addCapture(){
   const text = els.captureInput.value.trim();
   const entry = cache.daily;
   if(!text || currentType !== 'daily' || !entry.loaded) return;
-  const prefix = captureTag === CAPTURE_TODO_TAG ? CAPTURE_TODO : CAPTURE_LINE;
+  // If you already typed your own list marker or checkbox ("- [ ] call mom", "* idea", "1. step"),
+  // keep it exactly as typed instead of adding another "- " in front.
+  let prefix;
+  if(/^([-*+]\s|\d+[.)]\s)/.test(text)) prefix = '';
+  else if(/^\[[ xX]\]\s/.test(text)) prefix = CAPTURE_LINE;          // "[ ] call mom" -> "- [ ] call mom"
+  else if(captureTag === CAPTURE_TODO_TAG) prefix = CAPTURE_TODO;
+  else prefix = CAPTURE_LINE;
   const line = prefix + text + (captureTag ? ' #' + captureTag : '');
   let content = (state.mode === 'edit' && els.rawWrap.style.display === 'block') ? els.raw.value : entry.content;
   if(content && !content.endsWith('\n')) content += '\n';
