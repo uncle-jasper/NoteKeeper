@@ -127,7 +127,8 @@
   #preview .callout-title{font-weight:600; margin-bottom:.2em;}
   #preview hr{border:none; border-top:1px solid var(--border); margin:1.4em 0;}
   #preview .tag{background:var(--accent); color:#fff; border-radius:10px; padding:1px 8px; font-size:.82em; text-decoration:none;}
-  #preview .wikilink{color:var(--accent); border-bottom:1px dotted var(--accent);}
+  #preview .wikilink{color:var(--accent); border-bottom:1px dotted var(--accent); cursor:pointer;}
+  #preview .wikilink:hover{border-bottom-style:solid;}
   #preview a.mdlink{color:var(--accent); text-decoration:underline;}
   #preview a.mdlink:hover{opacity:.85;}
   #preview .frontmatter{color:var(--muted); font-size:.85em; font-family:ui-monospace,Menlo,Consolas,monospace; background:var(--code-bg); border-radius:6px; padding:10px 14px; margin-bottom:1em; white-space:pre-wrap;}
@@ -572,10 +573,14 @@ async function listFolder(path){
   return entries;
 }
 
-async function searchVault(query){
+async function searchVault(query, filenameOnly){
   const r = await dbxRpc('files/search_v2', {
     query,
-    options:{ path:VAULT_ROOT, max_results:50, file_extensions:['md'], file_status:'active' }
+    options:{
+      path:VAULT_ROOT, max_results: filenameOnly ? 100 : 50,
+      file_extensions:['md'], file_status:'active',
+      ...(filenameOnly ? { filename_only:true } : {})
+    }
   });
   return r.matches.map(m => m.metadata && m.metadata.metadata).filter(m => m && m['.tag'] === 'file');
 }
@@ -589,9 +594,18 @@ function inline(md){
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/(?<!\*)\*(?!\*)([^*]+)\*(?!\*)/g, '<em>$1</em>');
-  s = s.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (m,name,_,alias)=>`<span class="wikilink">${alias||name}</span>`);
+  // Wikilinks are set aside as placeholders while the link/tag rules run, so a '#' or '[..](..)' inside
+  // a link's name or alias can't be turned into a tag pill or corrupt the link's data attribute.
+  const wikilinks = [];
+  s = s.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (m,name,_,alias)=>{
+    // Target is URL-encoded so spaces, quotes and '#' are safe inside the attribute.
+    const raw = name.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+    wikilinks.push(`<span class="wikilink" data-target="${encodeURIComponent(raw)}">${alias||name}</span>`);
+    return `\u0001${wikilinks.length - 1}\u0001`;
+  });
   s = s.replace(/\[([^\[\]]+)\]\(([^()\s]+)\)/g, (m,text,url)=>`<a class="mdlink" href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`);
   s = s.replace(/(^|\s)#([a-zA-Z0-9_\/-]+)/g, (m,pre,tag)=>`${pre}<a class="tag">#${tag}</a>`);
+  s = s.replace(/\u0001(\d+)\u0001/g, (m,i)=>wikilinks[+i]);
   return s;
 }
 function renderMarkdown(text){
@@ -811,6 +825,8 @@ els.modeBtn.onclick = async () => {
 // Click into the rendered note to start editing it.
 els.preview.addEventListener('click', (e) => {
   if(e.target.closest('a.mdlink')) return; // let the link open normally, don't also jump into edit mode
+  const wl = e.target.closest('.wikilink');
+  if(wl){ openWikilink(wl.dataset.target); return; } // [[note links]] open that note instead of entering edit mode
   if(!cache[currentType].loaded) return; // e.g. "Create it" prompt, nothing to edit yet
   if(state.mode === 'edit') return;
   setMode('edit');
@@ -1317,7 +1333,41 @@ function hideVaultPane(){
   vaultActive = false;
   els.vaultPane.style.display = 'none';
 }
+// Clicking [[Note Name]] in a preview: find that note by file name anywhere in the vault and open it.
+// Handles [[Name|alias]], [[Name#Heading]] (opens the note, no jump), and [[Folder/Name]].
+async function openWikilink(encoded){
+  let target;
+  try{ target = decodeURIComponent(encoded); }catch(e){ return; }
+  target = target.split('#')[0].split('^')[0].trim().replace(/\.md$/i, '');
+  if(!target) return; // [[#Heading]] points inside this same note
+  const base = target.split('/').pop();
+  setStatus('Finding “' + base + '”…');
+  try{
+    let hits = (await searchVault(base, true))
+      .filter(h => h.name.replace(/\.md$/i, '').toLowerCase() === base.toLowerCase());
+    if(target.includes('/')){
+      const tail = ('/' + target + '.md').toLowerCase();
+      const narrowed = hits.filter(h => h.path_display.toLowerCase().endsWith(tail));
+      if(narrowed.length) hits = narrowed;
+    }
+    if(!hits.length){ setStatus('No note named “' + base + '” in your vault.', 'error'); return; }
+    if(hits.length === 1){ setStatus(''); await openFile(hits[0].path_display); return; }
+    // Several notes share this name: let the user pick, using the file list screen.
+    await showVault();
+    vaultReq++;
+    els.vaultSearch.value = '';
+    els.vaultCrumbs.textContent = 'Several notes are named “' + base + '”. Pick one:';
+    els.vaultList.textContent = '';
+    hits.forEach(h => els.vaultList.append(
+      vaultRow('📄', h.name.replace(/\.md$/i, ''), relPath(parentPath(h.path_display)), () => openFile(h.path_display))
+    ));
+  }catch(e){
+    setStatus(vaultErrorText(e), 'error');
+  }
+}
+
 async function openFile(path){
+  await flushCurrent(); // save anything pending in the note we're leaving (e.g. when following a link)
   const name = path.split('/').pop().replace(/\.md$/i, '');
   cache.file = Object.assign(blankEntry(), { path, label:name });
   foldState.file = new Set();
