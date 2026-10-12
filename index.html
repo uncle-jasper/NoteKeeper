@@ -142,23 +142,47 @@
   #lockScreen .lockIcon{font-size:38px;}
   #lockScreen h2{margin:0; font-size:16px; font-weight:600;}
   #lockScreen .sub{color:var(--muted); font-size:12px; max-width:280px; margin:0;}
-  #pinInput{
-    font-family:var(--note-font); font-size:26px; letter-spacing:10px; text-align:center;
-    width:170px; padding:10px 0 10px 10px; background:var(--panel); color:var(--text);
+  #passInput{
+    font-family:var(--note-font); font-size:16px; text-align:center;
+    width:260px; max-width:80vw; padding:10px 12px; background:var(--panel); color:var(--text);
     border:1px solid var(--border); border-radius:8px; outline:none;
   }
-  #pinInput:focus{border-color:var(--accent);}
+  #passInput:focus{border-color:var(--accent);}
   #lockError{color:var(--danger); font-size:12px; min-height:16px;}
+  #wipeLink, #signOutLink{color:var(--muted); font-size:11px; background:none; border:none; padding:0; cursor:pointer; text-decoration:underline;}
+  #wipeLink:hover, #signOutLink:hover{color:var(--danger);}
+  #navRow .navLabel{max-width:55vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #filesBtn{display:none;}
+  /* Vault browser */
+  #vaultPane{flex:1; min-height:0; display:none; flex-direction:column; gap:8px; padding:0 16px 16px;}
+  #vaultSearch{
+    width:100%; padding:8px 12px; font-size:13px; background:var(--panel); color:var(--text);
+    border:1px solid var(--border); border-radius:8px; outline:none; font-family:inherit;
+  }
+  #vaultSearch:focus{border-color:var(--accent);}
+  #vaultCrumbs{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); min-height:26px;}
+  #vaultCrumbs .path{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #vaultList{flex:1; overflow-y:auto; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:4px;}
+  #vaultList .vmsg{color:var(--muted); font-size:13px; padding:16px; line-height:1.5;}
+  #vaultList .vrow{
+    display:flex; align-items:baseline; gap:8px; width:100%; text-align:left;
+    background:transparent; border:none; border-radius:6px; padding:8px 10px; font-size:13px; color:var(--text);
+  }
+  #vaultList .vrow:hover{background:var(--code-bg);}
+  #vaultList .vrow .vname{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #vaultList .vrow .vsub{color:var(--muted); font-size:11px; margin-left:auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:50%;}
 </style>
 </head>
 <body data-theme="dark">
 
 <div id="lockScreen">
   <div class="lockIcon">🔒</div>
-  <h2 id="lockTitle">Enter PIN</h2>
-  <p class="sub" id="lockSub">NoteKeeper is locked. Enter your 6-digit PIN to continue.</p>
-  <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="pinInput" autocomplete="off">
+  <h2 id="lockTitle">Enter passphrase</h2>
+  <p class="sub" id="lockSub">NoteKeeper is locked.</p>
+  <input type="password" id="passInput" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Passphrase">
+  <button class="primary" id="unlockBtn">Unlock</button>
   <div id="lockError"></div>
+  <button id="wipeLink" type="button">Forgot it? Wipe this browser and reconnect Dropbox</button>
 </div>
 
 <header>
@@ -179,6 +203,7 @@
   <button class="tab" data-type="daily">Daily</button>
   <button class="tab" data-type="weekly">Weekly</button>
   <button class="tab" data-type="monthly">Monthly</button>
+  <button class="tab" data-type="file">Vault</button>
 </div>
 
 <div id="navRow">
@@ -186,6 +211,7 @@
   <span class="navLabel" id="dateLabel"></span>
   <button class="icon" id="nextBtn" title="Next">→</button>
   <button id="todayBtn" title="Jump to current">Today</button>
+  <button id="filesBtn" title="Back to the vault file list">☰ Files</button>
 </div>
 
 <div id="status"></div>
@@ -193,8 +219,14 @@
 <main>
   <div id="connectScreen">
     <div style="font-size:34px;">📓</div>
-    <p>This app opens and edits your current daily, weekly, and monthly notes directly in your Dropbox — nothing else in your vault is touched.</p>
+    <p>This app opens and edits your daily, weekly, and monthly notes, and lets you browse and edit other notes in your vault, directly in your Dropbox.</p>
     <button class="primary" id="connectBtn">Connect Dropbox</button>
+  </div>
+
+  <div id="vaultPane">
+    <input type="search" id="vaultSearch" placeholder="Search your vault (names and contents)…" autocomplete="off" spellcheck="false">
+    <div id="vaultCrumbs"></div>
+    <div id="vaultList"></div>
   </div>
 
   <div id="editWrap" style="display:none;">
@@ -205,7 +237,7 @@
     <div id="preview"></div>
   </div>
 </main>
-<div class="hint">On Windows: click the install icon in the address bar (Edge/Chrome) to pin this as an app, or right-click the tab → Pin.</div>
+<div class="hint">On Windows: click the install icon in the address bar (Edge/Chrome) to pin this as an app, or right-click the tab → Pin. · <button id="signOutLink" type="button">Sign out &amp; wipe this browser</button></div>
 
 <script>
 /* ====== CONFIGURE THIS ====== */
@@ -217,7 +249,15 @@ const NOTE_TYPES = {
   daily:   { label: 'Daily',   icon: '📓', folder: '/Apps/remotely-save/ObsSync/Journal/Daily/',   pathFn: dailyPath },
   weekly:  { label: 'Weekly',  icon: '🗓️', folder: '/Apps/remotely-save/ObsSync/Journal/Weekly/',  pathFn: weeklyPath },
   monthly: { label: 'Monthly', icon: '📆', folder: '/Apps/remotely-save/ObsSync/Journal/Monthly/', pathFn: monthlyPath },
+  // Any note opened from the Vault tab. Its path is set when you pick a file.
+  file:    { label: 'Note',    icon: '📄', folder: '', pathFn: () => ({ path: cache.file.path, label: cache.file.label }) },
 };
+
+// Where the Vault tab starts browsing (your vault's root folder in Dropbox).
+const VAULT_ROOT = '/Apps/remotely-save/ObsSync';
+
+// Lock automatically after this many idle minutes (0 = never).
+const AUTO_LOCK_MINUTES = 10;
 /* ============================= */
 
 const REDIRECT_URI = location.href.split('?')[0].split('#')[0];
@@ -282,8 +322,16 @@ const els = {
   lockBtn: document.getElementById('lockBtn'),
   lockTitle: document.getElementById('lockTitle'),
   lockSub: document.getElementById('lockSub'),
-  pinInput: document.getElementById('pinInput'),
+  passInput: document.getElementById('passInput'),
+  unlockBtn: document.getElementById('unlockBtn'),
+  wipeLink: document.getElementById('wipeLink'),
+  signOutLink: document.getElementById('signOutLink'),
   lockError: document.getElementById('lockError'),
+  vaultPane: document.getElementById('vaultPane'),
+  vaultSearch: document.getElementById('vaultSearch'),
+  vaultCrumbs: document.getElementById('vaultCrumbs'),
+  vaultList: document.getElementById('vaultList'),
+  filesBtn: document.getElementById('filesBtn'),
 };
 
 // One cache entry per note type so switching tabs never loses unsaved edits.
@@ -291,7 +339,9 @@ const cache = {
   daily:   { path:'', label:'', content:'', dirty:false, loaded:false, offset:0 },
   weekly:  { path:'', label:'', content:'', dirty:false, loaded:false, offset:0 },
   monthly: { path:'', label:'', content:'', dirty:false, loaded:false, offset:0 },
+  file:    { path:'', label:'', content:'', dirty:false, loaded:false, offset:0 },
 };
+const blankEntry = () => ({ path:'', label:'', content:'', dirty:false, loaded:false, offset:0 });
 let currentType = 'daily';
 let state = { mode:'preview' }; // mode is shared UI state, not per-type
 
@@ -320,6 +370,62 @@ function adjustFontSize(delta){
 document.getElementById('fontUpBtn').onclick = () => adjustFontSize(1);
 document.getElementById('fontDownBtn').onclick = () => adjustFontSize(-1);
 
+// ---------- Token storage (encrypted at rest) ----------
+// The Dropbox refresh token is never stored in plain text. It is encrypted with a key
+// derived from your passphrase (PBKDF2 -> AES-GCM) and only decrypted into memory after
+// you unlock. Access tokens live in memory only, so closing the tab forgets them.
+const mem = { refresh:null, access:null, expiry:0, key:null, salt:null, iter:0 };
+const KDF_ITERATIONS = 600000;
+const ENC_KEY = 'nk_enc';
+
+const b64 = {
+  enc: buf => btoa(String.fromCharCode(...new Uint8Array(buf))),
+  dec: s => Uint8Array.from(atob(s), c => c.charCodeAt(0)),
+};
+async function deriveKey(pass, salt, iterations){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt, iterations, hash:'SHA-256' },
+    base, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
+  );
+}
+async function persistRefresh(){
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, mem.key, new TextEncoder().encode(mem.refresh));
+  localStorage.setItem(ENC_KEY, JSON.stringify({
+    v:1, it:mem.iter, salt:b64.enc(mem.salt), iv:b64.enc(iv), ct:b64.enc(ct)
+  }));
+}
+// Encrypt the in-memory refresh token under a new passphrase and store it.
+async function setPassphraseAndStore(pass){
+  mem.salt = crypto.getRandomValues(new Uint8Array(16));
+  mem.iter = KDF_ITERATIONS;
+  mem.key = await deriveKey(pass, mem.salt, mem.iter);
+  await persistRefresh();
+  // Remove anything left over from the old plain-text / PIN versions of this app.
+  ['dn_access_token','dn_token_expiry','dn_refresh_token','nk_pin_hash','dn_verifier']
+    .forEach(k => localStorage.removeItem(k));
+}
+// Returns true and fills memory if the passphrase is right.
+async function unlockWithPassphrase(pass){
+  let rec;
+  try{ rec = JSON.parse(localStorage.getItem(ENC_KEY)); }catch(e){ return false; }
+  if(!rec) return false;
+  try{
+    const salt = b64.dec(rec.salt);
+    const key = await deriveKey(pass, salt, rec.it);
+    const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv:b64.dec(rec.iv) }, key, b64.dec(rec.ct));
+    mem.refresh = new TextDecoder().decode(pt);
+    mem.key = key; mem.salt = salt; mem.iter = rec.it;
+    mem.access = null; mem.expiry = 0;
+    return true;
+  }catch(e){ return false; }
+}
+function clearMemory(){
+  mem.refresh = null; mem.access = null; mem.expiry = 0;
+  mem.key = null; mem.salt = null; mem.iter = 0;
+}
+
 // ---------- PKCE helpers ----------
 function randomString(len){
   const arr = new Uint8Array(len);
@@ -335,7 +441,7 @@ async function sha256Base64Url(str){
 
 async function beginAuth(){
   const verifier = randomString(64);
-  localStorage.setItem('dn_verifier', verifier);
+  sessionStorage.setItem('dn_verifier', verifier); // only needs to survive the redirect to Dropbox and back
   const challenge = await sha256Base64Url(verifier);
   const url = new URL('https://www.dropbox.com/oauth2/authorize');
   url.searchParams.set('client_id', APP_KEY);
@@ -348,7 +454,7 @@ async function beginAuth(){
 }
 
 async function exchangeCode(code){
-  const verifier = localStorage.getItem('dn_verifier');
+  const verifier = sessionStorage.getItem('dn_verifier');
   const body = new URLSearchParams({
     code, grant_type:'authorization_code', client_id:APP_KEY,
     code_verifier:verifier, redirect_uri:REDIRECT_URI
@@ -358,20 +464,24 @@ async function exchangeCode(code){
   });
   if(!res.ok) throw new Error('Token exchange failed');
   const data = await res.json();
+  sessionStorage.removeItem('dn_verifier');
   storeTokens(data);
   history.replaceState({}, '', REDIRECT_URI); // strip ?code= from URL
 }
 
 function storeTokens(data){
-  localStorage.setItem('dn_access_token', data.access_token);
-  localStorage.setItem('dn_token_expiry', Date.now() + (data.expires_in*1000) - 30000);
-  if(data.refresh_token) localStorage.setItem('dn_refresh_token', data.refresh_token);
+  mem.access = data.access_token;
+  mem.expiry = Date.now() + (data.expires_in*1000) - 30000;
+  if(data.refresh_token){
+    mem.refresh = data.refresh_token;
+    // Dropbox doesn't normally rotate refresh tokens, but if it does, keep the encrypted copy current.
+    if(mem.key) persistRefresh().catch(()=>{});
+  }
 }
 
 async function refreshToken(){
-  const refresh_token = localStorage.getItem('dn_refresh_token');
-  if(!refresh_token) return false;
-  const body = new URLSearchParams({ grant_type:'refresh_token', refresh_token, client_id:APP_KEY });
+  if(!mem.refresh) return false;
+  const body = new URLSearchParams({ grant_type:'refresh_token', refresh_token:mem.refresh, client_id:APP_KEY });
   const res = await fetch('https://api.dropboxapi.com/oauth2/token', {
     method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body
   });
@@ -382,26 +492,32 @@ async function refreshToken(){
 }
 
 async function getAccessToken(){
-  const expiry = Number(localStorage.getItem('dn_token_expiry') || 0);
-  if(Date.now() > expiry){
+  if(!mem.access || Date.now() > mem.expiry){
     const ok = await refreshToken();
     if(!ok) return null;
   }
-  return localStorage.getItem('dn_access_token');
+  return mem.access;
 }
 
 function isConnected(){
-  return !!localStorage.getItem('dn_refresh_token');
+  return !!mem.refresh;
 }
 
 // ---------- Dropbox file ops ----------
+// Dropbox-API-Arg is an HTTP header, so non-ASCII characters (e.g. Chinese note names)
+// must be written as \uXXXX escapes or the request fails.
+function dbxArg(obj){
+  return JSON.stringify(obj).replace(/[\u007f-￿]/g, c => '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4));
+}
+
 async function downloadFile(path){
   const token = await getAccessToken();
+  if(!token) throw new Error('Not connected');
   const res = await fetch('https://content.dropboxapi.com/2/files/download', {
     method:'POST',
     headers:{
       'Authorization':'Bearer '+token,
-      'Dropbox-API-Arg': JSON.stringify({ path })
+      'Dropbox-API-Arg': dbxArg({ path })
     }
   });
   if(res.status === 409) return null; // not found
@@ -411,17 +527,57 @@ async function downloadFile(path){
 
 async function uploadFile(path, content, mode){
   const token = await getAccessToken();
+  if(!token) throw new Error('Not connected');
   const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
     method:'POST',
     headers:{
       'Authorization':'Bearer '+token,
       'Content-Type':'application/octet-stream',
-      'Dropbox-API-Arg': JSON.stringify({ path, mode: mode||'overwrite', mute:true })
+      'Dropbox-API-Arg': dbxArg({ path, mode: mode||'overwrite', mute:true })
     },
     body: content
   });
   if(!res.ok) throw new Error('Upload failed');
   return await res.json();
+}
+
+// JSON-body Dropbox API calls (folder listing, search). Retries once if the access token expired.
+async function dbxRpc(endpoint, body){
+  for(let attempt = 0; attempt < 2; attempt++){
+    const token = await getAccessToken();
+    if(!token) throw new Error('Not connected');
+    const res = await fetch('https://api.dropboxapi.com/2/' + endpoint, {
+      method:'POST',
+      headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    });
+    if(res.ok) return await res.json();
+    const text = await res.text();
+    if(res.status === 401 && attempt === 0 && !text.includes('missing_scope')){
+      mem.access = null; // expired or invalid; refresh and try once more
+      continue;
+    }
+    throw new Error(text.slice(0, 300) || ('HTTP ' + res.status));
+  }
+  throw new Error('Not authorized');
+}
+
+async function listFolder(path){
+  let r = await dbxRpc('files/list_folder', { path, limit:2000 });
+  let entries = r.entries;
+  while(r.has_more){
+    r = await dbxRpc('files/list_folder/continue', { cursor:r.cursor });
+    entries = entries.concat(r.entries);
+  }
+  return entries;
+}
+
+async function searchVault(query){
+  const r = await dbxRpc('files/search_v2', {
+    query,
+    options:{ path:VAULT_ROOT, max_results:50, file_extensions:['md'], file_status:'active' }
+  });
+  return r.matches.map(m => m.metadata && m.metadata.metadata).filter(m => m && m['.tag'] === 'file');
 }
 
 // ---------- Obsidian-ish markdown render ----------
@@ -547,7 +703,7 @@ function renderPreview(){
 
 // ---------- Collapsible headings and bullets (preview only) ----------
 // Fold state lives in memory per tab and is keyed by source line number.
-const foldState = { daily: new Set(), weekly: new Set(), monthly: new Set() };
+const foldState = { daily: new Set(), weekly: new Set(), monthly: new Set(), file: new Set() };
 
 function setupFolding(){
   const folded = foldState[currentType];
@@ -942,9 +1098,15 @@ document.addEventListener('keydown', (e) => {
 });
 
 function updateTabBar(){
+  // While the file list is showing, the Vault tab is the active one.
+  const activeType = vaultActive ? 'file' : currentType;
   els.tabBar.querySelectorAll('.tab').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.type === currentType);
+    btn.classList.toggle('active', btn.dataset.type === activeType);
   });
+  const isFile = currentType === 'file' && !vaultActive;
+  els.navRow.classList.toggle('visible', !vaultActive);
+  els.prevBtn.style.display = els.nextBtn.style.display = els.todayBtn.style.display = isFile ? 'none' : '';
+  els.filesBtn.style.display = isFile ? 'inline-block' : 'none';
   els.dateLabel.textContent = cache[currentType].label || '';
 }
 
@@ -956,14 +1118,18 @@ async function loadNote(type){
   entry.label = label;
   updateTabBar();
   setStatus('Loading…');
-  let content = await downloadFile(path);
+  let content;
+  try{ content = await downloadFile(path); }
+  catch(e){ setStatus('Could not load from Dropbox. Check your connection.', 'error'); return; }
   if(content === null){
     setStatus('No note found at '+path, 'error');
-    els.preview.innerHTML = `<p>No ${cfg.label.toLowerCase()} note exists yet at <code>${escapeHtml(path)}</code>.</p>
-      <button class="primary" id="createBtn">Create it</button>`;
+    const canCreate = type !== 'file'; // opened files always exist; only the daily/weekly/monthly tabs offer to create
+    els.preview.innerHTML = `<p>No ${cfg.label.toLowerCase()} note exists yet at <code>${escapeHtml(path)}</code>.</p>`
+      + (canCreate ? `<button class="primary" id="createBtn">Create it</button>` : '');
     els.editWrap.style.display = 'flex';
     els.rawWrap.style.display = 'none';
     els.preview.style.display = 'block';
+    if(!canCreate) return;
     document.getElementById('createBtn').onclick = async () => {
       const blank = `# ${label}\n\n`;
       await uploadFile(path, blank, 'add');
@@ -995,15 +1161,26 @@ els.prevBtn.onclick = () => navigate(currentType, -1);
 els.nextBtn.onclick = () => navigate(currentType, 1);
 els.todayBtn.onclick = () => navigate(currentType, 'today');
 
-async function switchTab(type){
-  if(type === currentType) return;
-  // flush any pending edit on the tab we're leaving
-  if(state.mode==='edit') cache[currentType].content = els.raw.value;
+async function flushCurrent(){
+  const entry = cache[currentType];
+  if(state.mode === 'edit' && els.rawWrap.style.display === 'block') entry.content = els.raw.value;
   clearTimeout(autosaveTimer);
   await save(currentType);
+}
+
+async function switchTab(type){
+  if(type === 'file'){
+    if(vaultActive) return;
+    // Vault tab: show the file list if nothing is open, or if you're already looking at a file.
+    if(!cache.file.path || currentType === 'file'){ await showVault(); return; }
+  }
+  if(type === currentType && !vaultActive) return;
+  if(vaultActive) hideVaultPane();
+  else await flushCurrent();
   currentType = type;
   updateTabBar();
   if(cache[type].loaded){
+    els.editWrap.style.display = 'flex';
     setMode('preview');
     setStatus('');
   } else {
@@ -1016,86 +1193,294 @@ els.tabBar.querySelectorAll('.tab').forEach(btn => {
 
 els.connectBtn.onclick = beginAuth;
 
-// ---------- PIN lock ----------
-async function sha256Hex(str){
-  const enc = new TextEncoder().encode(str);
-  const digest = await crypto.subtle.digest('SHA-256', enc);
-  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,'0')).join('');
+// ---------- Vault browser ----------
+let vaultActive = false;
+let vaultDir = VAULT_ROOT;
+let vaultReq = 0;        // guards against slow responses arriving out of order
+let searchTimer = null;
+
+function underRoot(p){ return p.toLowerCase().startsWith(VAULT_ROOT.toLowerCase()); }
+function relPath(p){ return underRoot(p) ? p.slice(VAULT_ROOT.length).replace(/^\/+/, '') : p; }
+function parentPath(p){ const i = p.lastIndexOf('/'); return i <= 0 ? VAULT_ROOT : p.slice(0, i); }
+
+function vaultMessage(text, isError){
+  els.vaultList.textContent = '';
+  const d = document.createElement('div');
+  d.className = 'vmsg';
+  d.textContent = text;
+  if(isError) d.style.color = 'var(--danger)';
+  els.vaultList.appendChild(d);
 }
+function vaultErrorText(e){
+  const msg = String((e && e.message) || e);
+  if(msg.includes('missing_scope')) return 'Dropbox has not given this app permission to list files yet. In the Dropbox App Console, open your app’s Permissions tab, enable files.metadata.read, and click Submit. Then use “Sign out & wipe this browser” (bottom of the page) and connect again.';
+  if(msg.includes('not_found')) return 'That folder was not found in your Dropbox.';
+  if(msg.includes('Not connected')) return 'Not connected to Dropbox.';
+  return 'Could not load from Dropbox. ' + msg.slice(0, 120);
+}
+function vaultRow(icon, name, sub, onClick){
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'vrow';
+  const i = document.createElement('span'); i.textContent = icon;
+  const n = document.createElement('span'); n.className = 'vname'; n.textContent = name;
+  b.append(i, n);
+  if(sub){ const s = document.createElement('span'); s.className = 'vsub'; s.textContent = sub; b.append(s); }
+  b.onclick = onClick;
+  return b;
+}
+function renderCrumbs(){
+  els.vaultCrumbs.textContent = '';
+  if(vaultDir.toLowerCase() !== VAULT_ROOT.toLowerCase()){
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.textContent = '↑ Up';
+    up.onclick = () => browseTo(parentPath(vaultDir));
+    els.vaultCrumbs.append(up);
+  }
+  const p = document.createElement('span');
+  p.className = 'path';
+  p.textContent = '/' + relPath(vaultDir);
+  els.vaultCrumbs.append(p);
+}
+function sortEntries(a, b){
+  const dated = /^\d{4}/;
+  if(dated.test(a.name) && dated.test(b.name)) return b.name.localeCompare(a.name); // newest first for dated names
+  return a.name.localeCompare(b.name, undefined, { numeric:true, sensitivity:'base' });
+}
+function renderVaultEntries(entries){
+  const dirs = entries.filter(e => e['.tag'] === 'folder' && !e.name.startsWith('.')).sort(sortEntries);
+  const files = entries.filter(e => e['.tag'] === 'file' && /\.md$/i.test(e.name)).sort(sortEntries);
+  els.vaultList.textContent = '';
+  if(!dirs.length && !files.length){ vaultMessage('This folder has no notes.'); return; }
+  dirs.forEach(d => els.vaultList.append(vaultRow('📁', d.name, '', () => browseTo(d.path_display))));
+  files.forEach(f => els.vaultList.append(vaultRow('📄', f.name.replace(/\.md$/i, ''), '', () => openFile(f.path_display))));
+}
+async function browseTo(path){
+  vaultDir = path;
+  els.vaultSearch.value = '';
+  await refreshVaultList();
+}
+async function refreshVaultList(){
+  const req = ++vaultReq;
+  renderCrumbs();
+  vaultMessage('Loading…');
+  try{
+    const entries = await listFolder(vaultDir);
+    if(req !== vaultReq) return;
+    renderVaultEntries(entries);
+  }catch(e){
+    if(req !== vaultReq) return;
+    vaultMessage(vaultErrorText(e), true);
+  }
+}
+async function runVaultSearch(){
+  const q = els.vaultSearch.value.trim();
+  if(q.length < 2){ await refreshVaultList(); return; }
+  const req = ++vaultReq;
+  vaultMessage('Searching…');
+  try{
+    const hits = await searchVault(q);
+    if(req !== vaultReq) return;
+    els.vaultList.textContent = '';
+    if(!hits.length){ vaultMessage('No notes found.'); return; }
+    hits.forEach(h => {
+      const folder = relPath(parentPath(h.path_display));
+      els.vaultList.append(vaultRow('📄', h.name.replace(/\.md$/i, ''), folder, () => openFile(h.path_display)));
+    });
+  }catch(e){
+    if(req !== vaultReq) return;
+    vaultMessage(vaultErrorText(e), true);
+  }
+}
+els.vaultSearch.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runVaultSearch, 400);
+});
+els.vaultSearch.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ clearTimeout(searchTimer); runVaultSearch(); }
+});
 
+async function showVault(){
+  if(vaultActive) return;
+  await flushCurrent();
+  if(state.mode === 'edit') setMode('preview');
+  vaultActive = true;
+  els.editWrap.style.display = 'none';
+  els.connectScreen.style.display = 'none';
+  els.vaultPane.style.display = 'flex';
+  setStatus('');
+  updateTabBar();
+  await refreshVaultList();
+}
+function hideVaultPane(){
+  vaultActive = false;
+  els.vaultPane.style.display = 'none';
+}
+async function openFile(path){
+  const name = path.split('/').pop().replace(/\.md$/i, '');
+  cache.file = Object.assign(blankEntry(), { path, label:name });
+  foldState.file = new Set();
+  currentType = 'file';
+  hideVaultPane();
+  updateTabBar();
+  await loadNote('file');
+}
+els.filesBtn.onclick = () => showVault();
+
+// ---------- Lock screen, passphrase, auto-lock, wipe ----------
 let lockMode = 'unlock'; // 'unlock' | 'setup1' | 'setup2'
-let pendingPin = null;
+let pendingPass = null;
 let appStarted = false;
+let lockBusy = false;
+let idleTimer = null;
 
-function isPinSet(){ return !!localStorage.getItem('nk_pin_hash'); }
-
-function showLock(mode){
+function showLock(mode, errorMsg){
   lockMode = mode;
-  els.pinInput.value = '';
-  els.lockError.textContent = '';
+  els.passInput.value = '';
+  els.lockError.textContent = errorMsg || '';
   if(mode === 'unlock'){
-    els.lockTitle.textContent = 'Enter PIN';
-    els.lockSub.textContent = 'NoteKeeper is locked. Enter your 6-digit PIN to continue.';
+    els.lockTitle.textContent = 'Enter passphrase';
+    els.lockSub.textContent = 'NoteKeeper is locked.';
+    els.unlockBtn.textContent = 'Unlock';
+    els.wipeLink.style.display = '';
   } else if(mode === 'setup1'){
-    els.lockTitle.textContent = 'Set a 6-digit PIN';
-    els.lockSub.textContent = 'This protects NoteKeeper if someone else has access to this computer.';
+    els.lockTitle.textContent = 'Choose a passphrase';
+    els.lockSub.textContent = 'At least 8 characters. It encrypts your Dropbox access in this browser, so copied browser data is useless without it. If you forget it, you just reconnect Dropbox.';
+    els.unlockBtn.textContent = 'Continue';
+    els.wipeLink.style.display = 'none';
   } else {
-    els.lockTitle.textContent = 'Confirm PIN';
-    els.lockSub.textContent = 'Enter the same 6 digits again.';
+    els.lockTitle.textContent = 'Confirm passphrase';
+    els.lockSub.textContent = 'Enter the same passphrase again.';
+    els.unlockBtn.textContent = 'Save and unlock';
+    els.wipeLink.style.display = 'none';
   }
   els.lockScreen.style.display = 'flex';
-  els.pinInput.focus();
+  els.passInput.focus();
 }
 function hideLock(){
   els.lockScreen.style.display = 'none';
 }
 
-async function handlePinComplete(value){
-  if(lockMode === 'unlock'){
-    const hash = await sha256Hex(value);
-    if(hash === localStorage.getItem('nk_pin_hash')){
-      hideLock();
-      if(!appStarted){ appStarted = true; startApp(); }
+async function handleLockSubmit(){
+  if(lockBusy) return;
+  const value = els.passInput.value;
+  if(!value) return;
+  lockBusy = true;
+  els.unlockBtn.disabled = true;
+  try{
+    if(lockMode === 'unlock'){
+      els.lockError.textContent = 'Unlocking…';
+      if(await unlockWithPassphrase(value)){ hideLock(); startApp(); }
+      else { els.passInput.value = ''; els.lockError.textContent = 'Incorrect passphrase'; }
+    } else if(lockMode === 'setup1'){
+      if(value.length < 8){ els.lockError.textContent = 'Use at least 8 characters'; }
+      else { pendingPass = value; showLock('setup2'); }
     } else {
-      els.lockError.textContent = 'Incorrect PIN';
-      els.pinInput.value = '';
+      if(value === pendingPass){
+        els.lockError.textContent = 'Encrypting…';
+        pendingPass = null;
+        await setPassphraseAndStore(value);
+        hideLock();
+        startApp();
+      } else {
+        pendingPass = null;
+        showLock('setup1', "Passphrases didn't match. Try again.");
+      }
     }
-  } else if(lockMode === 'setup1'){
-    pendingPin = value;
-    showLock('setup2');
-  } else if(lockMode === 'setup2'){
-    if(value === pendingPin){
-      localStorage.setItem('nk_pin_hash', await sha256Hex(value));
-      pendingPin = null;
-      hideLock();
-      if(!appStarted){ appStarted = true; startApp(); }
-    } else {
-      els.lockError.textContent = "PINs didn't match — try again";
-      pendingPin = null;
-      showLock('setup1');
-    }
+  }catch(e){
+    els.lockError.textContent = 'Something went wrong. Reload the page and try again.';
+  }finally{
+    lockBusy = false;
+    els.unlockBtn.disabled = false;
   }
 }
-els.pinInput.addEventListener('input', () => {
-  els.pinInput.value = els.pinInput.value.replace(/\D/g,'').slice(0,6);
-  if(els.pinInput.value.length === 6) handlePinComplete(els.pinInput.value);
+els.unlockBtn.onclick = handleLockSubmit;
+els.passInput.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ e.preventDefault(); handleLockSubmit(); }
 });
-els.lockBtn.onclick = async () => {
-  if(!isPinSet()) return; // nothing to lock behind yet
-  if(state.mode==='edit') cache[currentType].content = els.raw.value;
+
+// Remove every trace of note content from the page (used when locking).
+function wipeScreen(){
+  els.raw.value = '';
+  els.hl.textContent = '';
+  els.preview.textContent = '';
+  els.vaultList.textContent = '';
+  els.vaultSearch.value = '';
+  els.vaultCrumbs.textContent = '';
+  Object.keys(cache).forEach(k => { cache[k] = blankEntry(); });
+  Object.keys(foldState).forEach(k => { foldState[k] = new Set(); });
+  currentType = 'daily';
+  vaultActive = false;
+  vaultDir = VAULT_ROOT;
+  state.mode = 'preview';
+  els.modeBtn.textContent = 'Edit';
+  els.vaultPane.style.display = 'none';
+  els.editWrap.style.display = 'none';
+  els.rawWrap.style.display = 'none';
+  els.connectScreen.style.display = 'none';
+  els.tabBar.classList.remove('visible');
+  els.navRow.classList.remove('visible');
+  els.dateLabel.textContent = '';
+  setStatus('');
+}
+
+// Save, then drop the decrypted token and all note content from memory and the page.
+async function lockNow(force){
+  if(!appStarted || !isConnected()) return;
+  await flushCurrent();
+  if(!force && Object.values(cache).some(e => e.dirty) &&
+     !confirm('Some changes have not been saved to Dropbox yet. Lock anyway and lose them?')) return;
   clearTimeout(autosaveTimer);
-  await save(currentType);
+  clearTimeout(idleTimer);
+  appStarted = false;
+  clearMemory();
+  wipeScreen();
   showLock('unlock');
+}
+els.lockBtn.onclick = () => lockNow(false);
+
+// Auto-lock after a period with no clicks, keys, or scrolling.
+function bumpIdle(){
+  clearTimeout(idleTimer);
+  if(!appStarted || !mem.refresh || !AUTO_LOCK_MINUTES) return;
+  idleTimer = setTimeout(idleLock, AUTO_LOCK_MINUTES * 60000);
+}
+async function idleLock(){
+  if(Object.values(cache).some(e => e.dirty)){ bumpIdle(); return; } // never discard unsaved edits; try again later
+  await lockNow(true);
+}
+['pointerdown','keydown','scroll','touchstart'].forEach(ev =>
+  document.addEventListener(ev, bumpIdle, { passive:true, capture:true })
+);
+
+// Erase everything this app stored in this browser, and any cached files.
+async function wipeBrowser(){
+  clearMemory();
+  try{ localStorage.clear(); sessionStorage.clear(); }catch(e){}
+  try{ if('caches' in window){ for(const k of await caches.keys()) await caches.delete(k); } }catch(e){}
+  try{ if('serviceWorker' in navigator){ for(const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); } }catch(e){}
+  location.replace(REDIRECT_URI);
+}
+async function signOutAndWipe(){
+  if(!confirm('Sign out of Dropbox and erase everything NoteKeeper stored in this browser?')) return;
+  try{ await flushCurrent(); }catch(e){}
+  try{
+    // Revoking the access token also revokes its refresh token, so the connection is dead everywhere.
+    const t = await getAccessToken();
+    if(t) await fetch('https://api.dropboxapi.com/2/auth/token/revoke', { method:'POST', headers:{ 'Authorization':'Bearer '+t } });
+  }catch(e){}
+  await wipeBrowser();
+}
+els.signOutLink.onclick = signOutAndWipe;
+els.wipeLink.onclick = () => {
+  if(confirm('Erase everything NoteKeeper stored in this browser? You will need to connect Dropbox again. (To fully cut off access, also remove NoteKeeper at dropbox.com/account/connected_apps.)')) wipeBrowser();
 };
 
 // ---------- boot ----------
 async function startApp(){
-  const params = new URLSearchParams(location.search);
-  if(params.has('code')){
-    setStatus('Connecting…');
-    try{ await exchangeCode(params.get('code')); }
-    catch(e){ setStatus('Dropbox connection failed', 'error'); return; }
-  }
+  appStarted = true;
+  bumpIdle();
   if(isConnected()){
     els.connectScreen.style.display = 'none';
     els.tabBar.classList.add('visible');
@@ -1110,12 +1495,27 @@ async function startApp(){
   }
 }
 
-// Entry point: gate behind the PIN before anything else runs.
-if(isPinSet()){
-  showLock('unlock');
-} else {
-  showLock('setup1');
+async function boot(){
+  const params = new URLSearchParams(location.search);
+  if(params.has('code')){
+    // Back from Dropbox: swap the code for tokens (kept in memory), then ask for a passphrase to encrypt them.
+    try{ await exchangeCode(params.get('code')); }
+    catch(e){
+      history.replaceState({}, '', REDIRECT_URI);
+      els.connectScreen.style.display = 'flex';
+      setStatus('Dropbox connection failed. Try connecting again.', 'error');
+      return;
+    }
+    showLock('setup1');
+    return;
+  }
+  if(localStorage.getItem(ENC_KEY)){ showLock('unlock'); return; }
+  // One-time upgrade: an older version stored the token in plain text. Encrypt it under a new passphrase.
+  const legacy = localStorage.getItem('dn_refresh_token');
+  if(legacy){ mem.refresh = legacy; showLock('setup1'); return; }
+  startApp();
 }
+boot();
 </script>
 </body>
 </html>
