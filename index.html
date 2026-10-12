@@ -1611,15 +1611,14 @@ function insertCaptureLine(content, line){
     if(/^\s*(---+|\*\*\*+|___+)\s*$/.test(lines[i])){ rule = i; break; }
   }
   const footerLen = rule >= 0 ? lines.slice(rule + 1).filter(l => l.trim()).length : 0;
-  if(rule > 0 && footerLen <= 8){
-    let k = rule;
-    while(k > 0 && !lines[k - 1].trim()) k--;      // skip blank lines above the rule
-    const before = lines.slice(0, k);
-    const after = lines.slice(rule);
-    return before.concat([line, ''], after).join('\n');
-  }
-  if(content && !content.endsWith('\n')) content += '\n';
-  return content + line + '\n';
+  const hasFooter = rule > 0 && footerLen <= 8;
+  let body = hasFooter ? lines.slice(0, rule) : lines.slice();
+  const after = hasFooter ? lines.slice(rule) : [];
+  while(body.length && !body[body.length - 1].trim()) body.pop();   // drop trailing blank lines
+  // An empty bullet waiting on the last line ("-", "- ", "- [ ]") is filled in, not skipped over.
+  if(body.length && /^\s*([-*+]|\d+[.)])\s*(\[[ xX]\])?\s*$/.test(body[body.length - 1])) body.pop();
+  body.push(line);
+  return (hasFooter ? body.concat([''], after) : body.concat([''])).join('\n');
 }
 function addCapture(){
   const text = els.captureInput.value.trim();
