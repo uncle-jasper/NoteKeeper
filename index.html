@@ -127,7 +127,8 @@
   #preview .callout-title{font-weight:600; margin-bottom:.2em;}
   #preview hr{border:none; border-top:1px solid var(--border); margin:1.4em 0;}
   #preview .tag{background:var(--accent); color:#fff; border-radius:10px; padding:1px 8px; font-size:.82em; text-decoration:none;}
-  #preview .wikilink{color:var(--accent); border-bottom:1px dotted var(--accent);}
+  #preview .wikilink{color:var(--accent); border-bottom:1px dotted var(--accent); cursor:pointer;}
+  #preview .wikilink:hover{border-bottom-style:solid;}
   #preview a.mdlink{color:var(--accent); text-decoration:underline;}
   #preview a.mdlink:hover{opacity:.85;}
   #preview .frontmatter{color:var(--muted); font-size:.85em; font-family:ui-monospace,Menlo,Consolas,monospace; background:var(--code-bg); border-radius:6px; padding:10px 14px; margin-bottom:1em; white-space:pre-wrap;}
@@ -152,7 +153,24 @@
   #wipeLink, #signOutLink{color:var(--muted); font-size:11px; background:none; border:none; padding:0; cursor:pointer; text-decoration:underline;}
   #wipeLink:hover, #signOutLink:hover{color:var(--danger);}
   #navRow .navLabel{max-width:55vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  #filesBtn{display:none;}
+  #filesBtn, #backBtn{display:none;}
+  #backBtn{padding:4px 10px; font-size:13px;}
+  #conflictBar{display:none; flex-wrap:wrap; align-items:center; gap:8px; margin:8px 16px 0; padding:8px 12px; font-size:12px;
+    border:1px solid var(--danger); border-radius:8px; background:color-mix(in srgb, var(--danger) 12%, var(--panel));}
+  #conflictBar span{flex:1 1 220px;}
+  #conflictBar button{padding:4px 10px; font-size:12px;}
+  #captureBar{display:none; flex-wrap:wrap; align-items:center; gap:6px; padding:8px 16px 0; flex-shrink:0;}
+  #captureBar.visible{display:flex;}
+  #captureInput{
+    flex:1 1 180px; min-width:0; padding:6px 10px; font-size:13px; background:var(--panel); color:var(--text);
+    border:1px solid var(--border); border-radius:6px; outline:none; font-family:var(--note-font);
+  }
+  #captureInput:focus{border-color:var(--accent);}
+  #captureChips{display:inline-flex; gap:4px; flex-wrap:wrap;}
+  #captureChips .chip{padding:3px 8px; font-size:12px; border-radius:10px; color:var(--muted);}
+  #captureChips .chip.on{background:var(--accent); color:#fff; border-color:var(--accent);}
+  #vaultCrumbs .newBtn{margin-left:auto; padding:3px 10px; font-size:12px; flex-shrink:0;}
+  #vaultList .vhead{font-size:11px; color:var(--muted); padding:8px 10px 4px; text-transform:uppercase; letter-spacing:.05em;}
   /* Vault browser */
   #vaultPane{flex:1; min-height:0; display:none; flex-direction:column; gap:8px; padding:0 16px 16px;}
   #vaultSearch{
@@ -207,11 +225,25 @@
 </div>
 
 <div id="navRow">
+  <button id="backBtn" title="Back to where you followed the link from">← Back</button>
   <button class="icon" id="prevBtn" title="Previous">←</button>
   <span class="navLabel" id="dateLabel"></span>
   <button class="icon" id="nextBtn" title="Next">→</button>
   <button id="todayBtn" title="Jump to current">Today</button>
   <button id="filesBtn" title="Back to the vault file list">☰ Files</button>
+</div>
+
+<div id="conflictBar">
+  <span>This note was changed somewhere else (possibly by sync), so your latest edits are <b>not saved</b>.</span>
+  <button id="cfTheirs" title="Throw away my edits and load the version in Dropbox">Use their version</button>
+  <button id="cfMine" title="Overwrite the Dropbox version with mine">Keep mine</button>
+  <button id="cfCopy" title="Save my version as a separate note, then load theirs">Save mine as copy</button>
+</div>
+
+<div id="captureBar">
+  <input type="text" id="captureInput" placeholder="Add a line to this note…" autocomplete="off" spellcheck="false" aria-label="Quick capture">
+  <span id="captureChips"></span>
+  <button class="primary" id="captureBtn">Add</button>
 </div>
 
 <div id="status"></div>
@@ -258,6 +290,13 @@ const VAULT_ROOT = '/Apps/remotely-save/ObsSync';
 
 // Lock automatically after this many idle minutes (0 = never).
 const AUTO_LOCK_MINUTES = 10;
+
+// Quick-capture bar on the Daily tab: tag buttons, and how an added line starts.
+// Picking the "things" tag adds a to-do checkbox line instead of a plain bullet.
+const CAPTURE_TAGS = ['idea', 'zh', 'resource', 'things'];
+const CAPTURE_LINE = '- ';
+const CAPTURE_TODO = '- [ ] ';
+const CAPTURE_TODO_TAG = 'things';
 /* ============================= */
 
 const REDIRECT_URI = location.href.split('?')[0].split('#')[0];
@@ -332,6 +371,15 @@ const els = {
   vaultCrumbs: document.getElementById('vaultCrumbs'),
   vaultList: document.getElementById('vaultList'),
   filesBtn: document.getElementById('filesBtn'),
+  backBtn: document.getElementById('backBtn'),
+  conflictBar: document.getElementById('conflictBar'),
+  cfTheirs: document.getElementById('cfTheirs'),
+  cfMine: document.getElementById('cfMine'),
+  cfCopy: document.getElementById('cfCopy'),
+  captureBar: document.getElementById('captureBar'),
+  captureInput: document.getElementById('captureInput'),
+  captureChips: document.getElementById('captureChips'),
+  captureBtn: document.getElementById('captureBtn'),
 };
 
 // One cache entry per note type so switching tabs never loses unsaved edits.
@@ -341,7 +389,7 @@ const cache = {
   monthly: { path:'', label:'', content:'', dirty:false, loaded:false, offset:0 },
   file:    { path:'', label:'', content:'', dirty:false, loaded:false, offset:0 },
 };
-const blankEntry = () => ({ path:'', label:'', content:'', dirty:false, loaded:false, offset:0 });
+const blankEntry = () => ({ path:'', label:'', content:'', dirty:false, loaded:false, offset:0, rev:null, conflict:false });
 let currentType = 'daily';
 let state = { mode:'preview' }; // mode is shared UI state, not per-type
 
@@ -522,7 +570,14 @@ async function downloadFile(path){
   });
   if(res.status === 409) return null; // not found
   if(!res.ok) throw new Error('Download failed');
-  return await res.text();
+  // The file's revision id lets us refuse to overwrite it if it changes elsewhere before we save.
+  let rev = null;
+  try{ const meta = JSON.parse(res.headers.get('dropbox-api-result') || 'null'); rev = meta && meta.rev; }catch(e){}
+  const content = await res.text();
+  if(!rev){
+    try{ rev = (await dbxRpc('files/get_metadata', { path })).rev; }catch(e){}
+  }
+  return { content, rev: rev || null };
 }
 
 async function uploadFile(path, content, mode){
@@ -537,7 +592,13 @@ async function uploadFile(path, content, mode){
     },
     body: content
   });
-  if(!res.ok) throw new Error('Upload failed');
+  if(!res.ok){
+    const text = await res.text().catch(() => '');
+    const err = new Error('Upload failed');
+    err.status = res.status;
+    err.conflict = res.status === 409 && /conflict/.test(text); // file changed (update) or already exists (add)
+    throw err;
+  }
   return await res.json();
 }
 
@@ -572,10 +633,14 @@ async function listFolder(path){
   return entries;
 }
 
-async function searchVault(query){
+async function searchVault(query, filenameOnly){
   const r = await dbxRpc('files/search_v2', {
     query,
-    options:{ path:VAULT_ROOT, max_results:50, file_extensions:['md'], file_status:'active' }
+    options:{
+      path:VAULT_ROOT, max_results: filenameOnly ? 100 : 50,
+      file_extensions:['md'], file_status:'active',
+      ...(filenameOnly ? { filename_only:true } : {})
+    }
   });
   return r.matches.map(m => m.metadata && m.metadata.metadata).filter(m => m && m['.tag'] === 'file');
 }
@@ -589,9 +654,18 @@ function inline(md){
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/(?<!\*)\*(?!\*)([^*]+)\*(?!\*)/g, '<em>$1</em>');
-  s = s.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (m,name,_,alias)=>`<span class="wikilink">${alias||name}</span>`);
+  // Wikilinks are set aside as placeholders while the link/tag rules run, so a '#' or '[..](..)' inside
+  // a link's name or alias can't be turned into a tag pill or corrupt the link's data attribute.
+  const wikilinks = [];
+  s = s.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (m,name,_,alias)=>{
+    // Target is URL-encoded so spaces, quotes and '#' are safe inside the attribute.
+    const raw = name.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+    wikilinks.push(`<span class="wikilink" data-target="${encodeURIComponent(raw)}">${alias||name}</span>`);
+    return `\u0001${wikilinks.length - 1}\u0001`;
+  });
   s = s.replace(/\[([^\[\]]+)\]\(([^()\s]+)\)/g, (m,text,url)=>`<a class="mdlink" href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`);
   s = s.replace(/(^|\s)#([a-zA-Z0-9_\/-]+)/g, (m,pre,tag)=>`${pre}<a class="tag">#${tag}</a>`);
+  s = s.replace(/\u0001(\d+)\u0001/g, (m,i)=>wikilinks[+i]);
   return s;
 }
 function renderMarkdown(text){
@@ -811,6 +885,8 @@ els.modeBtn.onclick = async () => {
 // Click into the rendered note to start editing it.
 els.preview.addEventListener('click', (e) => {
   if(e.target.closest('a.mdlink')) return; // let the link open normally, don't also jump into edit mode
+  const wl = e.target.closest('.wikilink');
+  if(wl){ openWikilink(wl.dataset.target); return; } // [[note links]] open that note instead of entering edit mode
   if(!cache[currentType].loaded) return; // e.g. "Create it" prompt, nothing to edit yet
   if(state.mode === 'edit') return;
   setMode('edit');
@@ -823,6 +899,8 @@ document.addEventListener('click', (e) => {
   if(e.target === els.modeBtn) return;           // that button already manages its own transition
   if(els.tabBar.contains(e.target)) return;      // tab switch already manages its own transition
   if(els.navRow.contains(e.target)) return;      // prev/next/today already manage their own transition
+  if(els.captureBar.contains(e.target)) return;  // quick-capture bar and conflict bar are part of the note area
+  if(els.conflictBar.contains(e.target)) return;
   if(e.target === els.lockBtn) return;            // locking already flushes/saves itself
   cache[currentType].content = els.raw.value;
   clearTimeout(autosaveTimer);
@@ -840,19 +918,76 @@ window.addEventListener('blur', () => {
   save();
 });
 
-async function save(type){
+// Saves are queued one at a time per note, because each save must carry the revision left by the
+// previous one. If Dropbox says the file changed elsewhere, we stop and show the conflict bar
+// instead of overwriting.
+function save(type){
   type = type || currentType;
   const entry = cache[type];
-  if(!entry || !entry.dirty || !entry.path) return;
+  if(!entry) return Promise.resolve();
+  entry.saveChain = (entry.saveChain || Promise.resolve()).then(() => doSave(type, entry)).catch(() => {});
+  return entry.saveChain;
+}
+async function doSave(type, entry){
+  if(!entry.dirty || !entry.path) return;
+  if(entry.conflict){
+    if(type === currentType) setStatus('Not saved: this note changed elsewhere', 'error');
+    return;
+  }
+  const path = entry.path, content = entry.content;
   try{
     if(type === currentType) setStatus('Saving…', 'saving');
-    await uploadFile(entry.path, entry.content, 'overwrite');
-    entry.dirty = false;
-    if(type === currentType) setStatus('Saved ✓');
+    const r = await uploadFile(path, content, entry.rev ? { '.tag':'update', update:entry.rev } : 'overwrite');
+    if(entry.path === path){
+      if(r && r.rev) entry.rev = r.rev;
+      if(entry.content === content) entry.dirty = false; // keep it dirty if you typed more while this was saving
+    }
+    if(type === currentType) setStatus(entry.dirty ? 'Typing…' : 'Saved ✓');
   }catch(e){
-    if(type === currentType) setStatus('Save failed — check connection', 'error');
+    if(e && e.conflict){
+      entry.conflict = true;
+      if(type === currentType) setStatus('Not saved: this note changed elsewhere', 'error');
+      renderConflictBar();
+    } else if(type === currentType){
+      setStatus('Save failed — check connection', 'error');
+    }
   }
 }
+
+function renderConflictBar(){
+  els.conflictBar.style.display = (cache[currentType].conflict && !vaultActive) ? 'flex' : 'none';
+}
+async function resolveConflict(choice){
+  const type = currentType, entry = cache[type];
+  if(!entry.conflict) return;
+  if(state.mode === 'edit' && els.rawWrap.style.display === 'block') entry.content = els.raw.value;
+  const mine = entry.content;
+  try{
+    if(choice === 'mine'){
+      const r = await uploadFile(entry.path, mine, 'overwrite');
+      entry.rev = r.rev || null;
+      entry.dirty = false; entry.conflict = false;
+      setStatus('Saved ✓ (your version kept)');
+    } else if(choice === 'copy'){
+      const d = new Date();
+      const stamp = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`;
+      const copyPath = entry.path.replace(/\.md$/i, '') + ` (NoteKeeper conflict ${stamp}).md`;
+      await uploadFile(copyPath, mine, 'add');
+      entry.dirty = false; entry.conflict = false;
+      await loadNote(type);
+      setStatus('Your version was saved as “' + copyPath.split('/').pop() + '” next to the original.');
+    } else {
+      entry.dirty = false; entry.conflict = false;
+      await loadNote(type);
+    }
+  }catch(e){
+    setStatus('Could not resolve the conflict. Check your connection.', 'error');
+  }
+  renderConflictBar();
+}
+els.cfTheirs.onclick = () => resolveConflict('theirs');
+els.cfMine.onclick = () => resolveConflict('mine');
+els.cfCopy.onclick = () => resolveConflict('copy');
 els.saveBtn.onclick = () => {
   if(state.mode==='edit') cache[currentType].content = els.raw.value;
   cache[currentType].dirty = true;
@@ -1107,7 +1242,10 @@ function updateTabBar(){
   els.navRow.classList.toggle('visible', !vaultActive);
   els.prevBtn.style.display = els.nextBtn.style.display = els.todayBtn.style.display = isFile ? 'none' : '';
   els.filesBtn.style.display = isFile ? 'inline-block' : 'none';
+  els.backBtn.style.display = (navStack.length && !vaultActive) ? 'inline-block' : 'none';
   els.dateLabel.textContent = cache[currentType].label || '';
+  updateCaptureBar();
+  renderConflictBar();
 }
 
 async function loadNote(type){
@@ -1118,10 +1256,12 @@ async function loadNote(type){
   entry.label = label;
   updateTabBar();
   setStatus('Loading…');
-  let content;
-  try{ content = await downloadFile(path); }
+  let got;
+  try{ got = await downloadFile(path); }
   catch(e){ setStatus('Could not load from Dropbox. Check your connection.', 'error'); return; }
-  if(content === null){
+  if(got === null){
+    entry.rev = null; entry.dirty = false; entry.conflict = false; entry.loaded = false;
+    updateCaptureBar(); renderConflictBar();
     setStatus('No note found at '+path, 'error');
     const canCreate = type !== 'file'; // opened files always exist; only the daily/weekly/monthly tabs offer to create
     els.preview.innerHTML = `<p>No ${cfg.label.toLowerCase()} note exists yet at <code>${escapeHtml(path)}</code>.</p>`
@@ -1132,19 +1272,34 @@ async function loadNote(type){
     if(!canCreate) return;
     document.getElementById('createBtn').onclick = async () => {
       const blank = `# ${label}\n\n`;
-      await uploadFile(path, blank, 'add');
-      entry.content = blank;
-      entry.loaded = true;
-      setStatus('Created');
-      setMode('preview');
+      try{
+        const r = await uploadFile(path, blank, 'add');
+        entry.rev = r.rev || null;
+        entry.content = blank;
+        entry.loaded = true;
+        setStatus('Created');
+        setMode('preview');
+        updateCaptureBar();
+      }catch(e){
+        if(e && e.conflict) await loadNote(type); // someone (or sync) created it in the meantime; open that one
+        else setStatus('Could not create the note. Check your connection.', 'error');
+      }
     };
     return;
   }
-  entry.content = content;
+  entry.content = got.content;
+  entry.rev = got.rev;
+  entry.dirty = false;
+  entry.conflict = false;
   entry.loaded = true;
   els.editWrap.style.display = 'flex';
+  // If we were in edit mode, drop the old textarea first: setMode('preview') would otherwise copy its
+  // stale text over the note we just loaded (e.g. when stepping to another day, or choosing "Use their version").
+  els.rawWrap.style.display = 'none';
   setMode('preview');
   setStatus('Loaded');
+  updateCaptureBar();
+  renderConflictBar();
 }
 
 async function navigate(type, action){
@@ -1152,7 +1307,11 @@ async function navigate(type, action){
   // flush any pending edit before we swap what this tab points to
   if(type === currentType && state.mode==='edit') entry.content = els.raw.value;
   clearTimeout(autosaveTimer);
-  if(entry.dirty) await save(type);
+  if(entry.dirty){
+    await save(type);
+    // Moving to another day would throw away edits that couldn't be saved (offline, or a conflict).
+    if(entry.dirty && !confirm('This note has changes that could not be saved. Leave it anyway and lose them?')) return;
+  }
   entry.offset = action === 'today' ? 0 : entry.offset + action;
   entry.loaded = false;
   await loadNote(type);
@@ -1188,12 +1347,14 @@ async function switchTab(type){
   }
 }
 els.tabBar.querySelectorAll('.tab').forEach(btn => {
-  btn.onclick = () => switchTab(btn.dataset.type);
+  btn.onclick = () => { navStack.length = 0; switchTab(btn.dataset.type); }; // choosing a tab yourself ends any "Back" trail
 });
 
 els.connectBtn.onclick = beginAuth;
 
 // ---------- Vault browser ----------
+let navStack = [];       // where you were before following [[links]], for the Back button
+const recents = [];      // recently opened vault notes. Memory only, so it's gone when you lock or close the tab
 let vaultActive = false;
 let vaultDir = VAULT_ROOT;
 let vaultReq = 0;        // guards against slow responses arriving out of order
@@ -1242,6 +1403,33 @@ function renderCrumbs(){
   p.className = 'path';
   p.textContent = '/' + relPath(vaultDir);
   els.vaultCrumbs.append(p);
+  const nb = document.createElement('button');
+  nb.type = 'button';
+  nb.className = 'newBtn';
+  nb.textContent = '+ New note';
+  nb.onclick = newNote;
+  els.vaultCrumbs.append(nb);
+}
+// Create a new, empty note in the folder you're looking at, then open it ready to type.
+async function newNote(){
+  const where = '/' + relPath(vaultDir);
+  let name = prompt('Name for the new note in ' + where + ':');
+  if(name === null) return;
+  name = name.trim().replace(/\.md$/i, '');
+  if(!name) return;
+  if(/[\\/:*?"<>|#^\[\]]/.test(name)){
+    setStatus('Note names can’t contain  \\ / : * ? " < > | # ^ [ ]', 'error');
+    return;
+  }
+  const path = vaultDir + '/' + name + '.md';
+  try{
+    await uploadFile(path, `# ${name}\n\n`, 'add');
+  }catch(e){
+    setStatus(e && e.conflict ? 'A note named “' + name + '” already exists there.' : 'Could not create the note. Check your connection.', 'error');
+    return;
+  }
+  await openFile(path);
+  if(cache.file.path === path && cache.file.loaded) setMode('edit');
 }
 function sortEntries(a, b){
   const dated = /^\d{4}/;
@@ -1252,7 +1440,17 @@ function renderVaultEntries(entries){
   const dirs = entries.filter(e => e['.tag'] === 'folder' && !e.name.startsWith('.')).sort(sortEntries);
   const files = entries.filter(e => e['.tag'] === 'file' && /\.md$/i.test(e.name)).sort(sortEntries);
   els.vaultList.textContent = '';
-  if(!dirs.length && !files.length){ vaultMessage('This folder has no notes.'); return; }
+  const head = text => { const h = document.createElement('div'); h.className = 'vhead'; h.textContent = text; els.vaultList.append(h); };
+  if(vaultDir.toLowerCase() === VAULT_ROOT.toLowerCase() && recents.length){
+    head('Recent');
+    recents.forEach(r => els.vaultList.append(vaultRow('🕒', r.name, relPath(parentPath(r.path)), () => openFile(r.path))));
+    head('Vault');
+  }
+  if(!dirs.length && !files.length){
+    const m = document.createElement('div'); m.className = 'vmsg'; m.textContent = 'This folder has no notes.';
+    els.vaultList.append(m);
+    return;
+  }
   dirs.forEach(d => els.vaultList.append(vaultRow('📁', d.name, '', () => browseTo(d.path_display))));
   files.forEach(f => els.vaultList.append(vaultRow('📄', f.name.replace(/\.md$/i, ''), '', () => openFile(f.path_display))));
 }
@@ -1317,8 +1515,59 @@ function hideVaultPane(){
   vaultActive = false;
   els.vaultPane.style.display = 'none';
 }
-async function openFile(path){
+// Clicking [[Note Name]] in a preview: find that note by file name anywhere in the vault and open it.
+// Handles [[Name|alias]], [[Name#Heading]] (opens the note, no jump), and [[Folder/Name]].
+async function openWikilink(encoded){
+  let target;
+  try{ target = decodeURIComponent(encoded); }catch(e){ return; }
+  target = target.split('#')[0].split('^')[0].trim().replace(/\.md$/i, '');
+  if(!target) return; // [[#Heading]] points inside this same note
+  const base = target.split('/').pop();
+  const origin = currentOrigin(); // so the Back button can return here
+  setStatus('Finding “' + base + '”…');
+  try{
+    let hits = (await searchVault(base, true))
+      .filter(h => h.name.replace(/\.md$/i, '').toLowerCase() === base.toLowerCase());
+    if(target.includes('/')){
+      const tail = ('/' + target + '.md').toLowerCase();
+      const narrowed = hits.filter(h => h.path_display.toLowerCase().endsWith(tail));
+      if(narrowed.length) hits = narrowed;
+    }
+    if(!hits.length){ setStatus('No note named “' + base + '” in your vault.', 'error'); return; }
+    if(hits.length === 1){ setStatus(''); await openFile(hits[0].path_display, { origin }); return; }
+    // Several notes share this name: let the user pick, using the file list screen.
+    await showVault();
+    vaultReq++;
+    els.vaultSearch.value = '';
+    els.vaultCrumbs.textContent = 'Several notes are named “' + base + '”. Pick one:';
+    els.vaultList.textContent = '';
+    hits.forEach(h => els.vaultList.append(
+      vaultRow('📄', h.name.replace(/\.md$/i, ''), relPath(parentPath(h.path_display)), () => openFile(h.path_display, { origin }))
+    ));
+  }catch(e){
+    setStatus(vaultErrorText(e), 'error');
+  }
+}
+
+function currentOrigin(){
+  return currentType === 'file' ? { type:'file', path:cache.file.path } : { type:currentType };
+}
+
+// opts.origin: we got here by following a link from that place (Back returns to it).
+// opts.keepStack: we got here by pressing Back. Otherwise the Back trail is cleared.
+async function openFile(path, opts = {}){
+  await flushCurrent(); // save anything pending in the note we're leaving (e.g. when following a link)
+  if(cache.file.dirty){
+    await save('file');
+    if(cache.file.dirty && !confirm('The note you have open has changes that could not be saved. Leave it anyway and lose them?')) return;
+  }
+  if(opts.origin){ navStack.push(opts.origin); if(navStack.length > 30) navStack.shift(); }
+  else if(!opts.keepStack) navStack.length = 0;
   const name = path.split('/').pop().replace(/\.md$/i, '');
+  const i = recents.findIndex(r => r.path.toLowerCase() === path.toLowerCase());
+  if(i !== -1) recents.splice(i, 1);
+  recents.unshift({ path, name });
+  if(recents.length > 8) recents.pop();
   cache.file = Object.assign(blankEntry(), { path, label:name });
   foldState.file = new Set();
   currentType = 'file';
@@ -1326,7 +1575,64 @@ async function openFile(path){
   updateTabBar();
   await loadNote('file');
 }
+async function goBack(){
+  const o = navStack.pop();
+  if(!o) return;
+  if(o.type === 'file') await openFile(o.path, { keepStack:true });
+  else await switchTab(o.type);
+  updateTabBar();
+}
+els.backBtn.onclick = goBack;
 els.filesBtn.onclick = () => showVault();
+
+// ---------- Quick capture (Daily tab) ----------
+let captureTag = null;
+function buildCaptureChips(){
+  els.captureChips.textContent = '';
+  CAPTURE_TAGS.forEach(t => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip' + (captureTag === t ? ' on' : '');
+    b.textContent = '#' + t;
+    b.onclick = () => { captureTag = captureTag === t ? null : t; buildCaptureChips(); els.captureInput.focus(); };
+    els.captureChips.append(b);
+  });
+}
+function updateCaptureBar(){
+  const e = cache.daily;
+  els.captureBar.classList.toggle('visible', currentType === 'daily' && !vaultActive && e.loaded && appStarted);
+}
+function addCapture(){
+  const text = els.captureInput.value.trim();
+  const entry = cache.daily;
+  if(!text || currentType !== 'daily' || !entry.loaded) return;
+  // If you already typed your own list marker or checkbox ("- [ ] call mom", "* idea", "1. step"),
+  // keep it exactly as typed instead of adding another "- " in front.
+  let prefix;
+  if(/^([-*+]\s|\d+[.)]\s)/.test(text)) prefix = '';
+  else if(/^\[[ xX]\]\s/.test(text)) prefix = CAPTURE_LINE;          // "[ ] call mom" -> "- [ ] call mom"
+  else if(captureTag === CAPTURE_TODO_TAG) prefix = CAPTURE_TODO;
+  else prefix = CAPTURE_LINE;
+  const line = prefix + text + (captureTag ? ' #' + captureTag : '');
+  let content = (state.mode === 'edit' && els.rawWrap.style.display === 'block') ? els.raw.value : entry.content;
+  if(content && !content.endsWith('\n')) content += '\n';
+  entry.content = content + line + '\n';
+  entry.dirty = true;
+  if(state.mode === 'edit'){ els.raw.value = entry.content; updateHighlight(); }
+  else renderPreview();
+  clearTimeout(autosaveTimer);
+  save('daily');
+  els.captureInput.value = '';
+  captureTag = null;
+  buildCaptureChips();
+  els.captureInput.focus();
+}
+els.captureBtn.onclick = addCapture;
+els.captureInput.addEventListener('keydown', (e) => {
+  // Don't submit while a Chinese/Japanese input method is still composing text.
+  if(e.key === 'Enter' && !e.isComposing && e.keyCode !== 229){ e.preventDefault(); addCapture(); }
+});
+buildCaptureChips();
 
 // ---------- Lock screen, passphrase, auto-lock, wipe ----------
 let lockMode = 'unlock'; // 'unlock' | 'setup1' | 'setup2'
@@ -1410,6 +1716,14 @@ function wipeScreen(){
   els.vaultCrumbs.textContent = '';
   Object.keys(cache).forEach(k => { cache[k] = blankEntry(); });
   Object.keys(foldState).forEach(k => { foldState[k] = new Set(); });
+  navStack = [];
+  recents.length = 0;
+  captureTag = null;
+  buildCaptureChips();
+  els.captureInput.value = '';
+  els.captureBar.classList.remove('visible');
+  els.conflictBar.style.display = 'none';
+  els.backBtn.style.display = 'none';
   currentType = 'daily';
   vaultActive = false;
   vaultDir = VAULT_ROOT;
