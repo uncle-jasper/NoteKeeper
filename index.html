@@ -1602,6 +1602,25 @@ function updateCaptureBar(){
   const e = cache.daily;
   els.captureBar.classList.toggle('visible', currentType === 'daily' && !vaultActive && e.loaded && appStarted);
 }
+// Put the new line at the end of the note's body, above a footer (the last "---" rule and the
+// short block of links under it). Notes without such a footer just get it appended at the end.
+function insertCaptureLine(content, line){
+  const lines = content.split('\n');
+  let rule = -1;
+  for(let i = lines.length - 1; i >= 0; i--){
+    if(/^\s*(---+|\*\*\*+|___+)\s*$/.test(lines[i])){ rule = i; break; }
+  }
+  const footerLen = rule >= 0 ? lines.slice(rule + 1).filter(l => l.trim()).length : 0;
+  if(rule > 0 && footerLen <= 8){
+    let k = rule;
+    while(k > 0 && !lines[k - 1].trim()) k--;      // skip blank lines above the rule
+    const before = lines.slice(0, k);
+    const after = lines.slice(rule);
+    return before.concat([line, ''], after).join('\n');
+  }
+  if(content && !content.endsWith('\n')) content += '\n';
+  return content + line + '\n';
+}
 function addCapture(){
   const text = els.captureInput.value.trim();
   const entry = cache.daily;
@@ -1615,8 +1634,7 @@ function addCapture(){
   else prefix = CAPTURE_LINE;
   const line = prefix + text + (captureTag ? ' #' + captureTag : '');
   let content = (state.mode === 'edit' && els.rawWrap.style.display === 'block') ? els.raw.value : entry.content;
-  if(content && !content.endsWith('\n')) content += '\n';
-  entry.content = content + line + '\n';
+  entry.content = insertCaptureLine(content, line);
   entry.dirty = true;
   if(state.mode === 'edit'){ els.raw.value = entry.content; updateHighlight(); }
   else renderPreview();
