@@ -44,8 +44,8 @@
   #navRow button{padding:4px 10px; font-size:13px;}
   #navRow #todayBtn{font-size:12px; color:var(--muted);}
   #navRow{position:relative;}
-  #navRow .navLabel.clickable{cursor:pointer; border-bottom:1px dotted var(--muted);}
-  #navRow .navLabel.clickable:hover{color:var(--text); border-bottom-color:var(--accent);}
+  #navRow .navLabel.clickable{cursor:pointer;}
+  #navRow .navLabel.clickable:hover{color:var(--text);}
   #calPop{position:absolute; top:100%; z-index:30; width:272px; margin-top:6px; padding:10px;
     background:var(--panel); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.35);}
   #calPop[hidden]{display:none;}
@@ -1460,7 +1460,8 @@ calPop.addEventListener('click', (e) => {
   else if(b.dataset.cal === 'today'){ const t = new Date(); calShowMonth(t.getFullYear(), t.getMonth()); }
   else if(b.dataset.date){ const [y,m,d] = b.dataset.date.split('-').map(Number); calPick(y, m, d); }
 });
-document.addEventListener('click', (e) => { if(!calPop.hidden && !calPop.contains(e.target) && e.target !== els.dateLabel) closeCalendar(); });
+// composedPath() is captured when the click happens, so it still counts clicks on buttons the calendar has since re-rendered (month arrows)
+document.addEventListener('click', (e) => { if(!calPop.hidden && !e.composedPath().includes(calPop) && e.target !== els.dateLabel) closeCalendar(); });
 document.addEventListener('keydown', (e) => { if(e.key === 'Escape' && !calPop.hidden) closeCalendar(); });
 
 async function flushCurrent(){
