@@ -43,6 +43,26 @@
   #navRow .navLabel{font-size:12px; color:var(--muted); min-width:90px;}
   #navRow button{padding:4px 10px; font-size:13px;}
   #navRow #todayBtn{font-size:12px; color:var(--muted);}
+  #navRow{position:relative;}
+  #navRow .navLabel.clickable{cursor:pointer; border-bottom:1px dotted var(--muted);}
+  #navRow .navLabel.clickable:hover{color:var(--text); border-bottom-color:var(--accent);}
+  #calPop{position:absolute; top:100%; z-index:30; width:272px; margin-top:6px; padding:10px;
+    background:var(--panel); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.35);}
+  #calPop[hidden]{display:none;}
+  #calPop .calHead{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; font-size:13px; font-weight:600;}
+  #calPop .calHead button{padding:2px 9px; font-size:13px;}
+  #calPop .calGrid{display:grid; grid-template-columns:repeat(7,1fr); gap:2px; text-align:center;}
+  #calPop .calDow{font-size:11px; color:var(--muted); padding:2px 0;}
+  #calPop .calDay{position:relative; padding:6px 0 9px; font-size:12px; border:1px solid transparent; border-radius:6px; background:none; color:var(--text); cursor:pointer;}
+  #calPop .calDay:hover{border-color:var(--accent);}
+  #calPop .calDay.out{color:var(--muted); opacity:.55;}
+  #calPop .calDay.today{border-color:var(--muted);}
+  #calPop .calDay.sel{background:var(--accent); color:#fff; border-color:var(--accent);}
+  #calPop .calDay.range{background:var(--code-bg);}
+  #calPop .calDay.has::after{content:''; position:absolute; left:50%; bottom:3px; width:4px; height:4px; margin-left:-2px; border-radius:50%; background:var(--accent);}
+  #calPop .calDay.sel.has::after{background:#fff;}
+  #calPop .calFoot{display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:11px; color:var(--muted);}
+  #calPop .calFoot button{font-size:11px; padding:2px 8px; color:var(--muted);}
   #tabBar button{
     background:transparent; border:1px solid transparent; border-bottom:none;
     border-radius:6px 6px 0 0; padding:6px 14px; font-size:13px; color:var(--muted);
@@ -231,6 +251,7 @@
   <button class="icon" id="nextBtn" title="Next">→</button>
   <button id="todayBtn" title="Jump to current">Today</button>
   <button id="filesBtn" title="Back to the vault file list">☰ Files</button>
+  <div id="calPop" role="dialog" aria-label="Calendar" hidden></div>
 </div>
 
 <div id="conflictBar">
@@ -331,6 +352,7 @@ function weeklyPath(offset=0){
 
 function monthlyPath(offset=0){
   const d = new Date();
+  d.setDate(1); // so stepping months from the 31st can't overflow into the month after
   d.setMonth(d.getMonth() + offset);
   const y = d.getFullYear();
   const label = `${y}-${pad(d.getMonth()+1)}`;
@@ -652,6 +674,7 @@ function escapeHtml(s){
 function inline(md){
   let s = escapeHtml(md);
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  s = s.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/(?<!\*)\*(?!\*)([^*]+)\*(?!\*)/g, '<em>$1</em>');
   // Wikilinks are set aside as placeholders while the link/tag rules run, so a '#' or '[..](..)' inside
@@ -1156,6 +1179,7 @@ function hlInline(s){
   s = s.replace(/`([^`]+)`/g, (m,c)=>keep(`<span class="m">\`</span><span class="c">${c}</span><span class="m">\`</span>`));
   s = s.replace(/\[\[([^\]]+)\]\]/g, (m,c)=>keep(`<span class="m">[[</span><span class="l">${c}</span><span class="m">]]</span>`));
   s = s.replace(/\[([^\[\]]+)\]\(([^()\s]+)\)/g, (m,t,u)=>keep(`<span class="m">[</span><span class="lu">${t}</span><span class="m">](${u})</span>`));
+  s = s.replace(/\*\*\*(.+?)\*\*\*/g, (m,c)=>keep(`<span class="m">***</span><span class="b i">${c}</span><span class="m">***</span>`));
   s = s.replace(/\*\*(.+?)\*\*/g, '<span class="m">**</span><span class="b">$1</span><span class="m">**</span>');
   s = s.replace(/(?<!\*)\*(?!\*)([^*]+)\*(?!\*)/g, '<span class="m">*</span><span class="i">$1</span><span class="m">*</span>');
   s = s.replace(/(^|\s)(#[a-zA-Z0-9_\/-]+)/g, '$1<span class="t">$2</span>');
@@ -1244,6 +1268,9 @@ function updateTabBar(){
   els.filesBtn.style.display = isFile ? 'inline-block' : 'none';
   els.backBtn.style.display = (navStack.length && !vaultActive) ? 'inline-block' : 'none';
   els.dateLabel.textContent = cache[currentType].label || '';
+  els.dateLabel.classList.toggle('clickable', !isFile);
+  els.dateLabel.title = isFile ? '' : 'Open calendar';
+  document.getElementById('calPop').hidden = true;
   updateCaptureBar();
   renderConflictBar();
 }
@@ -1319,6 +1346,122 @@ async function navigate(type, action){
 els.prevBtn.onclick = () => navigate(currentType, -1);
 els.nextBtn.onclick = () => navigate(currentType, 1);
 els.todayBtn.onclick = () => navigate(currentType, 'today');
+
+// ---------- Calendar popover (click the date label) ----------
+const calPop = document.getElementById('calPop');
+let calView = null;                 // {y, m} month being shown (m is 0-11)
+const calNotes = {};                // 'YYYY-MM' -> Set of day numbers that have a daily note
+const DAY_MS = 86400000;
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function calCurrentDate(){
+  // The date the open note stands for, so the calendar opens on the right month
+  const off = cache[currentType].offset || 0;
+  const d = new Date();
+  if(currentType === 'weekly') d.setDate(d.getDate() + off*7);
+  else if(currentType === 'monthly'){ d.setDate(1); d.setMonth(d.getMonth() + off); }
+  else d.setDate(d.getDate() + off);
+  return d;
+}
+function utcDay(y,m,d){ return Date.UTC(y,m,d); }
+function isoMonday(y,m,d){ // UTC ms of the Monday that starts this date's week
+  const t = utcDay(y,m,d), dow = new Date(t).getUTCDay() || 7;
+  return t - (dow-1)*DAY_MS;
+}
+
+async function calLoadNotes(y, m){
+  const key = `${y}-${pad(m+1)}`;
+  try{
+    const entries = await listFolder(`${NOTE_TYPES.daily.folder}${key}`.replace(/\/$/, ''));
+    const set = new Set();
+    entries.forEach(e => {
+      const mm = e.name.match(/^\d{4}-\d{2}-(\d{2})\.md$/);
+      if(e['.tag'] === 'file' && mm) set.add(+mm[1]);
+    });
+    calNotes[key] = set;
+  }catch(err){ calNotes[key] = new Set(); } // no folder yet (or offline): just no dots
+}
+
+function renderCalendar(){
+  const { y, m } = calView;
+  const today = new Date();
+  const cur = calCurrentDate();
+  const curT = utcDay(cur.getFullYear(), cur.getMonth(), cur.getDate());
+  const curMon = isoMonday(cur.getFullYear(), cur.getMonth(), cur.getDate());
+  const first = new Date(Date.UTC(y, m, 1));
+  const lead = ((first.getUTCDay() || 7) - 1);             // blanks before the 1st (Monday start)
+  const daysIn = new Date(Date.UTC(y, m+1, 0)).getUTCDate();
+  const has = calNotes[`${y}-${pad(m+1)}`];
+  let html = `<div class="calHead"><button type="button" data-cal="prev" aria-label="Previous month">‹</button>` +
+             `<span>${MONTH_NAMES[m]} ${y}</span><button type="button" data-cal="next" aria-label="Next month">›</button></div><div class="calGrid">`;
+  ['M','T','W','T','F','S','S'].forEach(d => html += `<div class="calDow">${d}</div>`);
+  const total = Math.ceil((lead + daysIn) / 7) * 7;
+  for(let i=0; i<total; i++){
+    const day = i - lead + 1;
+    const t = Date.UTC(y, m, day);                          // handles days before/after this month
+    const dt = new Date(t);
+    const inMonth = day >= 1 && day <= daysIn;
+    const cls = ['calDay'];
+    if(!inMonth) cls.push('out');
+    if(t === utcDay(today.getFullYear(), today.getMonth(), today.getDate())) cls.push('today');
+    if(currentType === 'daily'){ if(t === curT) cls.push('sel'); }
+    else if(currentType === 'weekly'){ if(isoMonday(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()) === curMon) cls.push('range'); }
+    else if(dt.getUTCFullYear() === cur.getFullYear() && dt.getUTCMonth() === cur.getMonth()) cls.push('range');
+    if(inMonth && has && has.has(day)) cls.push('has');
+    html += `<button type="button" class="${cls.join(' ')}" data-date="${dt.getUTCFullYear()}-${dt.getUTCMonth()}-${dt.getUTCDate()}">${dt.getUTCDate()}</button>`;
+  }
+  html += `</div><div class="calFoot"><span>● has a daily note</span><button type="button" data-cal="today">Today</button></div>`;
+  calPop.innerHTML = html;
+}
+
+async function calShowMonth(y, m){
+  calView = { y, m };
+  renderCalendar();                                          // draw right away, dots follow
+  const key = `${y}-${pad(m+1)}`;
+  await calLoadNotes(y, m);
+  if(!calPop.hidden && calView.y === y && calView.m === m) renderCalendar();
+}
+
+function closeCalendar(){ calPop.hidden = true; }
+async function openCalendar(){
+  if(currentType === 'file' || vaultActive) return;
+  const d = calCurrentDate();
+  calPop.hidden = false;
+  // keep the popover inside narrow (phone) screens
+  const lbl = els.dateLabel.getBoundingClientRect(), nav = els.navRow.getBoundingClientRect();
+  const left = Math.max(8 - nav.left, Math.min(lbl.left - nav.left, window.innerWidth - 280 - nav.left));
+  calPop.style.left = left + 'px';
+  Object.keys(calNotes).forEach(k => delete calNotes[k]);    // fresh dots on every open
+  await calShowMonth(d.getFullYear(), d.getMonth());
+}
+
+async function calPick(y, m, d){
+  const type = currentType;
+  const entry = cache[type];
+  const now = new Date();
+  let target;
+  if(type === 'daily') target = Math.round((utcDay(y,m,d) - utcDay(now.getFullYear(), now.getMonth(), now.getDate())) / DAY_MS);
+  else if(type === 'weekly') target = Math.round((isoMonday(y,m,d) - isoMonday(now.getFullYear(), now.getMonth(), now.getDate())) / (7*DAY_MS));
+  else target = (y - now.getFullYear())*12 + (m - now.getMonth());
+  closeCalendar();
+  if(target === entry.offset) return;
+  await navigate(type, target - entry.offset);
+}
+
+els.dateLabel.addEventListener('click', () => {
+  if(!calPop.hidden){ closeCalendar(); return; }
+  openCalendar();
+});
+calPop.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if(!b) return;
+  if(b.dataset.cal === 'prev') calShowMonth(calView.m === 0 ? calView.y-1 : calView.y, (calView.m + 11) % 12);
+  else if(b.dataset.cal === 'next') calShowMonth(calView.m === 11 ? calView.y+1 : calView.y, (calView.m + 1) % 12);
+  else if(b.dataset.cal === 'today'){ const t = new Date(); calShowMonth(t.getFullYear(), t.getMonth()); }
+  else if(b.dataset.date){ const [y,m,d] = b.dataset.date.split('-').map(Number); calPick(y, m, d); }
+});
+document.addEventListener('click', (e) => { if(!calPop.hidden && !calPop.contains(e.target) && e.target !== els.dateLabel) closeCalendar(); });
+document.addEventListener('keydown', (e) => { if(e.key === 'Escape' && !calPop.hidden) closeCalendar(); });
 
 async function flushCurrent(){
   const entry = cache[currentType];
